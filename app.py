@@ -156,8 +156,9 @@ HTML_PAGE = """
         }
 
         function showVideo() {
-            document.getElementById("video-player").classList.remove("hidden");
-        }
+    document.getElementById("video-player").classList.remove("hidden");
+       }
+
     </script>
 </body>
 </html>
