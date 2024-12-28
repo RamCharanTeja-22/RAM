@@ -1,6 +1,6 @@
-from flask import Flask, request, render_template_string, jsonify
+from flask import Flask, render_template_string, jsonify
 
-app = Flask(_name_)
+app = Flask(__name__)
 
 # HTML, CSS, and JS directly integrated
 HTML_PAGE = """
@@ -108,7 +108,7 @@ HTML_PAGE = """
             const subjectDiv = document.getElementById("subjects");
             subjectDiv.innerHTML = "";
             subjects[grade].forEach(subject => {
-                subjectDiv.innerHTML += <button onclick=\"loadTopics('${subject}')\">${subject}</button>;
+                subjectDiv.innerHTML += `<button onclick="loadTopics('${subject}')">${subject}</button>`;
             });
             document.getElementById("subjects-section").classList.remove("hidden");
             document.getElementById("topics-section").classList.add("hidden");
@@ -124,14 +124,14 @@ HTML_PAGE = """
             const topicsDiv = document.getElementById("topics");
             topicsDiv.innerHTML = "";
             (topics[subject] || []).forEach(topic => {
-                topicsDiv.innerHTML += <button onclick=\"loadContent('${topic}')\">${topic}</button>;
+                topicsDiv.innerHTML += `<button onclick="loadContent('${topic}')">${topic}</button>`;
             });
             document.getElementById("topics-section").classList.remove("hidden");
             document.getElementById("content-box").classList.add("hidden");
         }
 
         function loadContent(topic) {
-            fetch(/content/${topic})
+            fetch(`/content/${topic}`)
                 .then(response => response.json())
                 .then(data => {
                     const explanationDiv = document.getElementById("explanation");
@@ -182,5 +182,5 @@ def get_content(topic):
     explanation = EXPLANATIONS.get(topic, {"text": "No content available"})
     return jsonify({"text": explanation["text"]})
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     app.run(debug=True)
