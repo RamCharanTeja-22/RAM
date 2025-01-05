@@ -1,15 +1,12 @@
 from flask import Flask, render_template_string, jsonify, request, send_from_directory
 import os
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'videos'
-app.secret_key = 'your_secret_key_here'  # Added for session management
+app.secret_key = 'your_secret_key_here'  
 
-# Ensure video directory exists
-if not os.path.exists(app.config['UPLOAD_FOLDER']):
-    os.makedirs(app.config['UPLOAD_FOLDER'])
-
-# Education data structure
+# Rest of your data structures remain the same
 education_data = {
     'classes': {
         '8th': {
@@ -55,7 +52,6 @@ education_data = {
     }
 }
 
-# Content database
 content_db = {
     "Algebra Basics": [
         "Algebraic Expressions: An algebraic expression is a combination of terms connected by addition, subtraction, multiplication, or division. Terms are parts of an expression separated by addition or subtraction. Coefficients are numbers multiplying variables in a term. Constants are fixed numbers without variables. Solve more complex equations and inequalities. Learn about polynomials and how to factor them. Explore quadratic equations and their graphs."
@@ -105,9 +101,10 @@ content_db = {
     "Environmental Science": [
         "Study ecosystems and the balance of nature, learn about natural resources and their conservation, and explore environmental issues like pollution, deforestation, and climate change."
     ]
+    # Your content database remains the same
 }
 
-# HTML template with integrated login/registration
+# Modified HTML template with fixes
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -417,6 +414,40 @@ HTML_TEMPLATE = '''
                 cursor: pointer;
             }
         }
+        // Add this CSS to your existing styles
+        const additionalStyles = `
+        .typing-cursor {
+            display: inline-block;
+            width: 2px;
+            animation: blink 1s infinite;
+            margin-left: 2px;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        #content-display {
+            font-size: 1.2rem;
+            line-height: 1.6;
+            margin: 1rem 0;
+            padding: 1rem;
+            background: var(--light-bg);
+            border-radius: 8px;
+            min-height: 200px;
+        }
+
+        #content-display span {
+            opacity: 0;
+            animation: fadeIn 0.5s forwards;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        `;
     </style>
 </head>
 <body>
@@ -430,6 +461,7 @@ HTML_TEMPLATE = '''
                 <li><a onclick="showPage('home')"><i class="fas fa-home"></i> Home</a></li>
                 <li><a onclick="showPage('features')"><i class="fas fa-star"></i> Features</a></li>
                 <li><a onclick="showPage('learning-path')"><i class="fas fa-road"></i> Learning Path</a></li>
+             
                 <li class="dropdown">
                     <a id="authButton"><i class="fas fa-user"></i> Profile</a>
                     <div class="dropdown-content">
@@ -624,8 +656,9 @@ HTML_TEMPLATE = '''
         </div>
     </main>
 
+    <!-- Your HTML structure remains the same -->
     <script>
-        // State management
+     // Global variables
         let currentClass = null;
         let currentSubject = null;
         let currentTopic = null;
@@ -636,133 +669,72 @@ HTML_TEMPLATE = '''
         let users = JSON.parse(localStorage.getItem('users')) || [];
         let currentUser = JSON.parse(localStorage.getItem('currentUser'));
 
-        // Update auth button based on login status
+        // Core page navigation function
+        function showPage(pageId) {
+            document.querySelectorAll('.page').forEach(page => {
+                page.classList.remove('active');
+            });
+            
+            const targetPage = document.getElementById(`${pageId}-page`);
+            if (targetPage) {
+                targetPage.classList.add('active');
+            }
+
+            if (pageId === 'learning-path') {
+                initLearningPath();
+            }
+        }
+
+        // Auth button update
         function updateAuthButton() {
             const authButton = document.getElementById('authButton');
             if (currentUser) {
-                authButton.innerHTML = <i class="fas fa-user"></i> ${currentUser.displayName || currentUser.name};
+                authButton.innerHTML = `<i class="fas fa-user"></i> ${currentUser.displayName || currentUser.name}`;
             } else {
-                authButton.innerHTML = <i class="fas fa-user"></i> Login;
+                authButton.innerHTML = `<i class="fas fa-user"></i> Login`;
             }
         }
 
-        // Show Profile Page
-        function showProfile() {
-            if (!currentUser) {
-                showPage('login');
-                return;
-            }
-            document.getElementById('registeredName').value = currentUser.name;
-            document.getElementById('displayName').value = currentUser.displayName || currentUser.name;
-            document.getElementById('profileEmail').value = currentUser.email;
-            showPage('profile');
-        }
-
-        // Show Dashboard Page
-        function showDashboard() {
-            if (!currentUser) {
-                showPage('login');
-                return;
-            }
-            // Example data for dashboard (you can replace this with actual data)
-            document.getElementById('lessons-completed').textContent = '5';
-            document.getElementById('lessons-ongoing').textContent = '3';
-            document.getElementById('progress-percentage').textContent = '50%';
-            showPage('dashboard');
-        }
-
-        // Handle registration
-        function handleRegister(event) {
-            event.preventDefault();
-            const messageDiv = document.getElementById('registerMessage');
-            const name = document.getElementById('registerName').value;
-            const email = document.getElementById('registerEmail').value;
-            const password = document.getElementById('registerPassword').value;
-            const confirmPassword = document.getElementById('confirmPassword').value;
-
-            if (password !== confirmPassword) {
-                messageDiv.className = 'error-message';
-                messageDiv.textContent = 'Passwords do not match!';
-                return;
-            }
-
-            if (users.some(user => user.email === email)) {
-                messageDiv.className = 'error-message';
-                messageDiv.textContent = 'Email already registered!';
-                return;
-            }
-
-            users.push({ name, email, password });
-            localStorage.setItem('users', JSON.stringify(users));
-            
-            messageDiv.className = 'success-message';
-            messageDiv.textContent = 'Registration successful! Redirecting to login...';
-            
-            setTimeout(() => {
-                showPage('login');
-            }, 2000);
-        }
-
-        // Handle login
-        function handleLogin(event) {
-            event.preventDefault();
-            const messageDiv = document.getElementById('loginMessage');
-            const email = document.getElementById('loginEmail').value;
-            const password = document.getElementById('loginPassword').value;
-
-            const user = users.find(u => u.email === email && u.password === password);
-            
-            if (user) {
-                currentUser = user;
-                localStorage.setItem('currentUser', JSON.stringify(user));
-                updateAuthButton();
-                
-                messageDiv.className = 'success-message';
-                messageDiv.textContent = 'Login successful! Redirecting...';
-                
-                setTimeout(() => {
-                    showPage('home');
-                }, 1000);
-            } else {
-                messageDiv.className = 'error-message';
-                messageDiv.textContent = 'Invalid email or password!';
-            }
-        }
-
-        // Handle logout
-        function logout() {
-            currentUser = null;
-            localStorage.removeItem('currentUser');
-            updateAuthButton();
-            showPage('home');
-        }
-
-        // Initialize the learning path
+        // Learning path functions
         function initLearningPath() {
-            renderClasses();
-            updateBreadcrumb();
-        }
-
-        // Render class selection
-        function renderClasses() {
             fetch('/api/classes')
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
                 .then(data => {
-                    const container = document.getElementById('class-selection');
-                    container.innerHTML = Object.keys(data.classes).map(className => `
-                        <div class="card" onclick="selectClass('${className}')">
-                            <h2 class="card-title">Class ${className}</h2>
-                            <p class="card-content">Explore subjects and topics for Class ${className}</p>
-                        </div>
-                    `).join('');
+                    console.log('Classes data:', data);
+                    renderClasses(data);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error loading classes. Please try again later.');
                 });
         }
 
-        // Select a class
+        function renderClasses(data) {
+            const container = document.getElementById('class-selection');
+            if (!container) return;
+            
+            container.innerHTML = Object.keys(data.classes).map(className => `
+                <div class="card" onclick="selectClass('${className}')">
+                    <h2 class="card-title">Class ${className}</h2>
+                    <p class="card-content">Start your ${className} grade journey</p>
+                </div>
+            `).join('');
+            
+            showSection('class-selection');
+        }
+
         function selectClass(className) {
             currentClass = className;
-            fetch(/api/subjects/${className})
-                .then(response => response.json())
+            fetch(`/api/subjects/${className}`)
+                .then(response => {
+                    if (!response.ok) throw new Error('Network response was not ok');
+                    return response.json();
+                })
                 .then(data => {
                     const container = document.getElementById('subject-selection');
                     container.innerHTML = Object.keys(data.subjects).map(subject => `
@@ -774,18 +746,20 @@ HTML_TEMPLATE = '''
                     
                     showSection('subject-selection');
                     updateBreadcrumb();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error loading subjects. Please try again later.');
                 });
         }
 
-        // Select a subject
         function selectSubject(subject) {
-            if (!currentUser) {
-                showPage('login');
-                return;
-            }
             currentSubject = subject;
-            fetch(/api/topics/${currentClass}/${subject})
-                .then(response => response.json())
+            fetch(`/api/topics/${currentClass}/${subject}`)
+                .then(response => {
+                    if (!response.ok) throw new Error('Network response was not ok');
+                    return response.json();
+                })
                 .then(data => {
                     const container = document.getElementById('topic-selection');
                     container.innerHTML = data.topics.map(topic => `
@@ -797,140 +771,381 @@ HTML_TEMPLATE = '''
                     
                     showSection('topic-selection');
                     updateBreadcrumb();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error loading topics. Please try again later.');
                 });
         }
 
-        // Select a topic
         function selectTopic(topic) {
             currentTopic = topic;
-            fetch(/api/content/${topic})
-                .then(response => response.json())
+            fetch(`/api/content/${encodeURIComponent(topic)}`)
+                .then(response => {
+                    if (!response.ok) throw new Error('Network response was not ok');
+                    return response.json();
+                })
                 .then(data => {
-                    if (data.content) {
-                        document.getElementById('topic-selection').classList.add('hidden');
-                        document.getElementById('content-section').classList.remove('hidden');
-                        displayContentWordByWord(data.content);
-                    } else {
-                        alert('No content available for this topic.');
-                    }
+                    document.getElementById('content-title').textContent = topic;
+                    document.getElementById('content-display').textContent = data.content;
+                    document.getElementById('mark-complete-button').disabled = false;
+                    showSection('content-section');
+                    updateBreadcrumb();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error loading content. Please try again later.');
                 });
-            updateBreadcrumb();
         }
 
-        // Display content word by word
-        function displayContentWordByWord(content) {
-            const contentContainer = document.getElementById('content-display');
-            contentContainer.innerHTML = ''; // Clear previous content
-            const words = content.split(' ');
-            let index = 0;
-
-            const interval = setInterval(() => {
-                if (index >= words.length) {
-                    clearInterval(interval);
-                    document.getElementById('mark-complete-button').disabled = false; // Enable "Mark as Complete" button
-                    return;
-                }
-                contentContainer.innerHTML += words[index] + ' ';
-                index++;
-            }, 100); // Adjust speed as needed
-        }
-
-        // Mark a topic as complete
+        // Video handling
         function markComplete() {
             contentComplete = true;
             document.getElementById('content-section').classList.add('hidden');
             document.getElementById('video-section').classList.remove('hidden');
-            fetch(/api/video/${currentTopic})
-                .then(response => response.json())
+            
+            fetch(`/api/video/${currentTopic}`)
+                .then(response => {
+                    if (!response.ok) throw new Error('Network response was not ok');
+                    return response.json();
+                })
                 .then(data => {
                     if (data.video_path) {
                         const videoPlayer = document.getElementById('video-player');
-                        videoPlayer.src = /videos/${data.video_path};
+                        videoPlayer.src = `/videos/${data.video_path}`;
+                        videoPlayer.onerror = function() {
+                            console.error('Video loading error');
+                            alert('Error loading video. Please try again later.');
+                        };
                         videoPlayer.load();
-                        videoPlayer.play();
+                        videoPlayer.play().catch(e => console.error('Video playback error:', e));
                     } else {
                         alert('No video available for this topic.');
                     }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error loading video. Please try again later.');
                 });
         }
 
-        // Show page function
-        function showPage(pageId) {
-            // If trying to access learning path while not logged in
-            if (pageId === 'learning-path' && !currentUser) {
-                showPage('login');
-                return;
-            }
-
-            document.querySelectorAll('.page').forEach(page => {
-                page.classList.remove('active');
+        // Navigation and section management
+        function showSection(sectionId) {
+            ['class-selection', 'subject-selection', 'topic-selection', 'content-section', 'video-section'].forEach(id => {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.classList.add('hidden');
+                }
             });
-            document.getElementById(pageId + '-page').classList.add('active');
             
-            if (pageId === 'learning-path') {
-                initLearningPath();
+            const targetSection = document.getElementById(sectionId);
+            if (targetSection) {
+                targetSection.classList.remove('hidden');
             }
             
-            if (isMobileMenuOpen) {
-                document.querySelector('nav ul').classList.remove('active');
-                isMobileMenuOpen = false;
+            const navigation = document.getElementById('navigation');
+            if (navigation) {
+                navigation.classList.toggle('hidden', sectionId === 'class-selection');
             }
         }
 
-        // Navigation
         function goBack() {
+            if (document.getElementById('video-section').classList.contains('hidden') === false) {
+                document.getElementById('video-section').classList.add('hidden');
+                document.getElementById('content-section').classList.remove('hidden');
+                return;
+            }
+            
             if (currentTopic) {
                 currentTopic = null;
-                showSection('topic-selection');
+                selectSubject(currentSubject);
             } else if (currentSubject) {
                 currentSubject = null;
-                showSection('subject-selection');
+                selectClass(currentClass);
             } else if (currentClass) {
                 currentClass = null;
                 showSection('class-selection');
-                document.getElementById('navigation').classList.add('hidden');
             }
             updateBreadcrumb();
         }
 
-        // Update breadcrumb
         function updateBreadcrumb() {
             const breadcrumb = document.getElementById('breadcrumb');
             let path = [];
-            if (currentClass) path.push(Class ${currentClass});
+            if (currentClass) path.push(`Class ${currentClass}`);
             if (currentSubject) path.push(currentSubject);
             if (currentTopic) path.push(currentTopic);
             breadcrumb.textContent = path.join(' → ');
         }
 
-        // Show/hide sections
-        function showSection(sectionId) {
-            ['class-selection', 'subject-selection', 'topic-selection', 'content-section', 'video-section'].forEach(id => {
-                document.getElementById(id).classList.add('hidden');
-            });
-            document.getElementById(sectionId).classList.remove('hidden');
-            document.getElementById('navigation').classList.remove('hidden');
+        // Auth functions
+        function handleLogin(event) {
+            event.preventDefault();
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            const user = users.find(u => u.email === email && u.password === password);
+            if (user) {
+                currentUser = user;
+                localStorage.setItem('currentUser', JSON.stringify(user));
+                updateAuthButton();
+                showPage('home');
+            } else {
+                document.getElementById('loginMessage').textContent = 'Invalid email or password';
+            }
         }
 
-        // Initialize auth state and mobile menu
-        updateAuthButton();
-        const menuToggle = document.querySelector('.menu-toggle');
-        menuToggle.addEventListener('click', () => {
-            const navUl = document.querySelector('nav ul');
-            navUl.classList.toggle('active');
-            isMobileMenuOpen = !isMobileMenuOpen;
+        function handleRegister(event) {
+            event.preventDefault();
+            const name = document.getElementById('registerName').value;
+            const email = document.getElementById('registerEmail').value;
+            const password = document.getElementById('registerPassword').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+            
+            if (password !== confirmPassword) {
+                document.getElementById('registerMessage').textContent = 'Passwords do not match';
+                return;
+            }
+            
+            if (users.some(u => u.email === email)) {
+                document.getElementById('registerMessage').textContent = 'Email already registered';
+                return;
+            }
+            
+            const newUser = { name, email, password, displayName: name };
+            users.push(newUser);
+            localStorage.setItem('users', JSON.stringify(users));
+            
+            currentUser = newUser;
+            localStorage.setItem('currentUser', JSON.stringify(newUser));
+            updateAuthButton();
+            showPage('home');
+        }
+
+        // Profile functions
+        function showProfile() {
+            if (!currentUser) {
+                showPage('login');
+                return;
+            }
+            
+            document.getElementById('registeredName').value = currentUser.name;
+            document.getElementById('displayName').value = currentUser.displayName || currentUser.name;
+            document.getElementById('profileEmail').value = currentUser.email;
+            showPage('profile');
+        }
+
+        function showDashboard() {
+            if (!currentUser) {
+                showPage('login');
+                return;
+            }
+            showPage('dashboard');
+        }
+
+        function logout() {
+            currentUser = null;
+            localStorage.removeItem('currentUser');
+            updateAuthButton();
+            showPage('home');
+        }
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', function() {
+            updateAuthButton();
+            const menuToggle = document.querySelector('.menu-toggle');
+            if (menuToggle) {
+                menuToggle.addEventListener('click', () => {
+                    const navUl = document.querySelector('nav ul');
+                    navUl.classList.toggle('active');
+                    isMobileMenuOpen = !isMobileMenuOpen;
+                });
+            }
+
+            // Initial check for mobile menu
+            if (window.innerWidth <= 768) {
+                const menuToggle = document.querySelector('.menu-toggle');
+                if (menuToggle) {
+                    menuToggle.style.display = 'block';
+                }
+            }
         });
+        // Add these functions to your existing JavaScript
 
-        // Initial check for mobile menu
-        if (window.innerWidth <= 768) {
-            menuToggle.style.display = 'block';
+        function typeWriter(text, elementId, speed = 200) {
+            const element = document.getElementById(elementId);
+            if (!element) return;
+            
+            // Clear any existing content
+            element.textContent = '';
+            
+            // Split the text into words and add spaces back
+            const words = text.split(' ').map(word => word + ' ');
+            let wordIndex = 0;
+            
+            // Create a span for the cursor
+            const cursorSpan = document.createElement('span');
+            cursorSpan.className = 'typing-cursor';
+            cursorSpan.textContent = '|';
+            element.appendChild(cursorSpan);
+
+            function typeNextWord() {
+                if (wordIndex < words.length) {
+                    const wordSpan = document.createElement('span');
+                    wordSpan.textContent = words[wordIndex];
+                    element.insertBefore(wordSpan, cursorSpan);
+                    wordIndex++;
+                    
+                    // Schedule the next word
+                    setTimeout(typeNextWord, speed);
+                } else {
+                    // Remove cursor when typing is complete
+                    cursorSpan.remove();
+                    // Enable the mark complete button
+                    document.getElementById('mark-complete-button').disabled = false;
+                }
+            }
+
+            // Start typing
+            typeNextWord();
         }
+
+        // Modify the existing selectTopic function
+        function selectTopic(topic) {
+            currentTopic = topic;
+            fetch(`/api/content/${encodeURIComponent(topic)}`)
+                .then(response => {
+                    if (!response.ok) throw new Error('Network response was not ok');
+                    return response.json();
+                })
+                .then(data => {
+                    document.getElementById('content-title').textContent = topic;
+                    document.getElementById('mark-complete-button').disabled = true;
+                    showSection('content-section');
+                    updateBreadcrumb();
+                    
+                    // Use the typeWriter function instead of direct assignment
+                    typeWriter(data.content, 'content-display');
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error loading content. Please try again later.');
+                });
+        }
+
+        
+
+        // Add the styles to the document
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add the new styles
+            const styleSheet = document.createElement("style");
+            styleSheet.textContent = additionalStyles;
+            document.head.appendChild(styleSheet);
+            
+            // Rest of your existing DOMContentLoaded code...
+        });
+        // Add these functions to your existing JavaScript
+
+        // Function to check if user is authenticated
+        function isAuthenticated() {
+            return currentUser !== null;
+        }
+
+        // Modify the existing showPage function
+        function showPage(pageId) {
+            // Check if trying to access protected pages
+            if (pageId === 'learning-path' || pageId === 'dashboard') {
+                if (!isAuthenticated()) {
+                    // Store the intended destination
+                    localStorage.setItem('intendedDestination', pageId);
+                    // Redirect to login
+                    const targetPage = document.getElementById('login-page');
+                    document.querySelectorAll('.page').forEach(page => {
+                        page.classList.remove('active');
+                    });
+                    targetPage.classList.add('active');
+                    return;
+                }
+            }
+
+            // Regular page navigation
+            document.querySelectorAll('.page').forEach(page => {
+                page.classList.remove('active');
+            });
+            
+            const targetPage = document.getElementById(`${pageId}-page`);
+            if (targetPage) {
+                targetPage.classList.add('active');
+            }
+
+            if (pageId === 'learning-path') {
+                initLearningPath();
+            }
+        }
+
+        // Modify the handleLogin function
+        function handleLogin(event) {
+            event.preventDefault();
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            const user = users.find(u => u.email === email && u.password === password);
+            if (user) {
+                currentUser = user;
+                localStorage.setItem('currentUser', JSON.stringify(user));
+                updateAuthButton();
+                
+                // Check for intended destination
+                const intendedDestination = localStorage.getItem('intendedDestination');
+                localStorage.removeItem('intendedDestination');
+                
+                // Redirect to intended page or home
+                showPage(intendedDestination || 'home');
+            } else {
+                document.getElementById('loginMessage').textContent = 'Invalid email or password';
+            }
+        }
+
+        // Modify the handleRegister function
+        function handleRegister(event) {
+            event.preventDefault();
+            const name = document.getElementById('registerName').value;
+            const email = document.getElementById('registerEmail').value;
+            const password = document.getElementById('registerPassword').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+            
+            if (password !== confirmPassword) {
+                document.getElementById('registerMessage').textContent = 'Passwords do not match';
+                return;
+            }
+            
+            if (users.some(u => u.email === email)) {
+                document.getElementById('registerMessage').textContent = 'Email already registered';
+                return;
+            }
+            
+            const newUser = { name, email, password, displayName: name };
+            users.push(newUser);
+            localStorage.setItem('users', JSON.stringify(users));
+            
+            currentUser = newUser;
+            localStorage.setItem('currentUser', JSON.stringify(newUser));
+            updateAuthButton();
+            
+            // Check for intended destination
+            const intendedDestination = localStorage.getItem('intendedDestination');
+            localStorage.removeItem('intendedDestination');
+            
+            // Redirect to intended page or home
+            showPage(intendedDestination || 'home');
+        }
+
+// Modify the menu click handlers in the HTML
+        
     </script>
 </body>
 </html>
 '''
-
-# Flask routes
 @app.route('/')
 def home():
     return render_template_string(HTML_TEMPLATE)
@@ -947,35 +1162,21 @@ def get_subjects(class_name):
 
 @app.route('/api/topics/<class_name>/<subject>')
 def get_topics(class_name, subject):
-    if class_name not in education_data['classes'] or \
-       subject not in education_data['classes'][class_name]['subjects']:
+    try:
+        topics = education_data['classes'][class_name]['subjects'][subject]['topics']
+        return jsonify({"topics": topics})
+    except KeyError:
         return jsonify({"error": "Invalid class or subject"}), 404
-    return jsonify({"topics": education_data['classes'][class_name]['subjects'][subject]['topics']})
 
 @app.route('/api/content/<topic>')
 def get_content(topic):
-    if topic not in content_db:
-        return jsonify({"content": None})
-    return jsonify({"content": content_db[topic][0]})  # Return the first content item for simplicity
-
-@app.route('/api/video/<topic>')
-def get_video(topic):
-    video_path = f"{topic.lower().replace(' ', '_')}.mp4"
-    if os.path.exists(os.path.join(app.config['UPLOAD_FOLDER'], video_path)):
-        return jsonify({"video_path": video_path})
-    return jsonify({"video_path": None})
+    content = content_db.get(topic, [None])[0]
+    return jsonify({"content": content})
 
 @app.route('/videos/<path:filename>')
 def serve_video(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
-@app.errorhandler(404)
-def not_found_error(error):
-    return jsonify({"error": "Resource not found"}), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    return jsonify({"error": "Internal server error"}), 500
-    
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0',port=5000)
+    # Run on a single port (5000)
+    app.run(host='0.0.0.0', port=5000, debug=True)
