@@ -1,12 +1,28 @@
 from flask import Flask, render_template_string, jsonify, request, send_from_directory
+from flask_mail import Mail, Message
 import os
-from werkzeug.utils import secure_filename
+import random
+import string
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'videos'
-app.secret_key = 'your_secret_key_here'  
+app.secret_key = 'your_secret_key_here'  # Added for session management
 
-# Rest of your data structures remain the same
+# Email configuration
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'  # Replace with your email provider's SMTP server
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = 'tutorteach.ai@gmail.com'  # Replace with your email
+app.config['MAIL_PASSWORD'] = 'TUTOR@123'  # Replace with your email password
+app.config['MAIL_DEFAULT_SENDER'] = 'jmadhan087@gmail.com'  # Replace with your email
+
+mail = Mail(app)
+
+# Ensure video directory exists
+if not os.path.exists(app.config['UPLOAD_FOLDER']):
+    os.makedirs(app.config['UPLOAD_FOLDER'])
+
+# Education data structure
 education_data = {
     'classes': {
         '8th': {
@@ -48,10 +64,31 @@ education_data = {
                     ]
                 }
             }
+        },
+        '10th': {
+            'subjects': {
+                'Mathematics': {
+                    'topics': [
+                        'Quadratic Equations',
+                        'Arithmetic Progressions',
+                        'Circles',
+                        'Probability'
+                    ]
+                },
+                'Science': {
+                    'topics': [
+                        'Chemical Reactions and Equations',
+                        'Acids, Bases and Salts',
+                        'Life Processes',
+                        'Heredity and Evolution'
+                    ]
+                }
+            }
         }
     }
 }
 
+# Content database
 content_db = {
     "Algebra Basics": [
         "Algebraic Expressions: An algebraic expression is a combination of terms connected by addition, subtraction, multiplication, or division. Terms are parts of an expression separated by addition or subtraction. Coefficients are numbers multiplying variables in a term. Constants are fixed numbers without variables. Solve more complex equations and inequalities. Learn about polynomials and how to factor them. Explore quadratic equations and their graphs."
@@ -100,11 +137,28 @@ content_db = {
     ],
     "Environmental Science": [
         "Study ecosystems and the balance of nature, learn about natural resources and their conservation, and explore environmental issues like pollution, deforestation, and climate change."
+    ],
+    "Quadratic Equations": [
+        "Learn about quadratic equations, their solutions, and how to graph them. Understand the discriminant and its significance in determining the nature of roots."
+    ],
+    "Arithmetic Progressions": [
+        "Understand the concept of arithmetic progressions, find the nth term, and the sum of the first n terms. Solve real-world problems using arithmetic progressions."
+    ],
+    "Circles": [
+        "Explore the properties of circles, including chords, tangents, and angles subtended by chords. Learn about the theorems related to circles and their applications."
+    ],
+    "Chemical Reactions and Equations": [
+        "Understand the types of chemical reactions, balancing chemical equations, and the importance of chemical reactions in daily life."
+    ],
+    "Acids, Bases and Salts": [
+        "Learn about the properties of acids, bases, and salts. Understand the pH scale, neutralization reactions, and the uses of acids, bases, and salts."
+    ],
+    "Heredity and Evolution": [
+        "Study the principles of heredity and variation. Understand the concepts of evolution, natural selection, and the evidence for evolution."
     ]
-    # Your content database remains the same
 }
 
-# Modified HTML template with fixes
+# HTML template with integrated login/registration
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -114,16 +168,16 @@ HTML_TEMPLATE = '''
     <title>TutorTeach.ai - Modern Learning Experience</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        /* CSS Styles */
+        /* CSS Variables for Color Scheme */
         :root {
-            --primary-color: #4361ee;
-            --secondary-color: #3bc9db;
-            --accent-color: #ffd803;
-            --danger-color: #e63946;
-            --text-color: #2b2d42;
-            --text-light: #6b7280;
-            --light-bg: #f8f9fa;
-            --white: #ffffff;
+            --primary-color: #4A90E2; /* Soft blue */
+            --secondary-color: #50E3C2; /* Teal */
+            --accent-color: #F5A623; /* Orange */
+            --danger-color: #D0021B; /* Red */
+            --text-color: #2C3E50; /* Dark gray */
+            --text-light: #7F8C8D; /* Light gray */
+            --light-bg: #F5F7FA; /* Light background */
+            --white: #FFFFFF; /* White */
             --gradient: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
         }
 
@@ -156,7 +210,7 @@ HTML_TEMPLATE = '''
         }
 
         header {
-            background: var(--gradient);
+            background: var(--primary-color);
             box-shadow: 0 4px 20px rgba(0,0,0,0.1);
             position: fixed;
             width: 100%;
@@ -347,7 +401,7 @@ HTML_TEMPLATE = '''
         }
 
         .button {
-            background: var(--gradient);
+            background: var(--primary-color);
             color: var(--white);
             padding: 1rem 2rem;
             border: none;
@@ -397,7 +451,7 @@ HTML_TEMPLATE = '''
                 top: 100%;
                 left: 0;
                 width: 100%;
-                background: var(--gradient);
+                background: var(--primary-color);
                 padding: 1rem;
                 flex-direction: column;
                 align-items: center;
@@ -414,40 +468,509 @@ HTML_TEMPLATE = '''
                 cursor: pointer;
             }
         }
-        // Add this CSS to your existing styles
-        const additionalStyles = `
-        .typing-cursor {
-            display: inline-block;
-            width: 2px;
-            animation: blink 1s infinite;
-            margin-left: 2px;
+
+        /* Animations */
+        @keyframes slideInFromLeft {
+            0% {
+                transform: translateX(-100%);
+                opacity: 0;
+            }
+            100% {
+                transform: translateX(0);
+                opacity: 1;
+            }
         }
 
-        @keyframes blink {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0; }
+        @keyframes slideInFromRight {
+            0% {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            100% {
+                transform: translateX(0);
+                opacity: 1;
+            }
         }
 
-        #content-display {
-            font-size: 1.2rem;
-            line-height: 1.6;
-            margin: 1rem 0;
-            padding: 1rem;
+        @keyframes slideInFromTop {
+            0% {
+                transform: translateY(-100%);
+                opacity: 0;
+            }
+            100% {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideInFromBottom {
+            0% {
+                transform: translateY(100%);
+                opacity: 0;
+            }
+            100% {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .slide-in-left {
+            animation: slideInFromLeft 1s ease-out;
+        }
+
+        .slide-in-right {
+            animation: slideInFromRight 1s ease-out;
+        }
+
+        .slide-in-top {
+            animation: slideInFromTop 1s ease-out;
+        }
+
+        .slide-in-bottom {
+            animation: slideInFromBottom 1s ease-out;
+        }
+
+        /* Background bubbles */
+        .bubbles {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        .bubbles li {
+            position: absolute;
+            list-style: none;
+            display: block;
+            width: 20px;
+            height: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            animation: animate 25s linear infinite;
+            bottom: -150px;
+        }
+
+        .bubbles li:nth-child(1) {
+            left: 25%;
+            width: 80px;
+            height: 80px;
+            animation-delay: 0s;
+        }
+
+        .bubbles li:nth-child(2) {
+            left: 10%;
+            width: 20px;
+            height: 20px;
+            animation-delay: 2s;
+            animation-duration: 12s;
+        }
+
+        .bubbles li:nth-child(3) {
+            left: 70%;
+            width: 20px;
+            height: 20px;
+            animation-delay: 4s;
+        }
+
+        .bubbles li:nth-child(4) {
+            left: 40%;
+            width: 60px;
+            height: 60px;
+            animation-delay: 0s;
+            animation-duration: 18s;
+        }
+
+        .bubbles li:nth-child(5) {
+            left: 65%;
+            width: 20px;
+            height: 20px;
+            animation-delay: 0s;
+        }
+
+        .bubbles li:nth-child(6) {
+            left: 75%;
+            width: 110px;
+            height: 110px;
+            animation-delay: 3s;
+        }
+
+        .bubbles li:nth-child(7) {
+            left: 35%;
+            width: 150px;
+            height: 150px;
+            animation-delay: 7s;
+        }
+
+        .bubbles li:nth-child(8) {
+            left: 50%;
+            width: 25px;
+            height: 25px;
+            animation-delay: 15s;
+            animation-duration: 45s;
+        }
+
+        .bubbles li:nth-child(9) {
+            left: 20%;
+            width: 15px;
+            height: 15px;
+            animation-delay: 2s;
+            animation-duration: 35s;
+        }
+
+        .bubbles li:nth-child(10) {
+            left: 85%;
+            width: 150px;
+            height: 150px;
+            animation-delay: 0s;
+            animation-duration: 11s;
+        }
+
+        @keyframes animate {
+            0% {
+                transform: translateY(0) rotate(0deg);
+                opacity: 1;
+                border-radius: 0;
+            }
+            100% {
+                transform: translateY(-1000px) rotate(720deg);
+                opacity: 0;
+                border-radius: 50%;
+            }
+        }
+
+        /* Profile image */
+        .profile-image {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            object-fit: cover;
+            margin-right: 10px;
+        }
+
+        /* Contact form */
+        .contact-form {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 2rem;
+            background: var(--white);
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .contact-form .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .contact-form .form-group label {
+            font-weight: 500;
+            color: var(--text-color);
+        }
+
+        .contact-form .form-group input,
+        .contact-form .form-group textarea {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            font-size: 1rem;
+        }
+
+        .contact-form .form-group textarea {
+            resize: vertical;
+            min-height: 150px;
+        }
+
+        .contact-form .button {
+            width: 100%;
+            margin-top: 1rem;
+        }
+
+        /* Testimonials Section */
+        .testimonials {
+            padding: 4rem 2rem;
             background: var(--light-bg);
+        }
+
+        .testimonials h2 {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .testimonial-card {
+            background: var(--white);
+            padding: 1.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+            margin-bottom: 1.5rem;
+        }
+
+        .testimonial-card img {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            object-fit: cover;
+            margin-bottom: 1rem;
+        }
+
+        .testimonial-card h3 {
+            margin-bottom: 0.5rem;
+        }
+
+        .testimonial-card p {
+            font-style: italic;
+            color: var(--text-light);
+        }
+
+        /* Footer Section */
+        footer {
+            background: var(--primary-color);
+            color: var(--white);
+            padding: 2rem;
+            text-align: center;
+        }
+
+        footer .footer-links {
+            margin-bottom: 1rem;
+        }
+
+        footer .footer-links a {
+            color: var(--white);
+            text-decoration: none;
+            margin: 0 1rem;
+        }
+
+        footer .footer-links a:hover {
+            text-decoration: underline;
+        }
+
+        footer .social-icons {
+            margin-bottom: 1rem;
+        }
+
+        footer .social-icons a {
+            color: var(--white);
+            margin: 0 0.5rem;
+            font-size: 1.5rem;
+        }
+
+        footer .social-icons a:hover {
+            color: var(--secondary-color);
+        }
+
+        footer .copyright {
+            font-size: 0.875rem;
+            color: var(--white);
+        }
+
+        /* Live Chat Icon */
+        .live-chat {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--primary-color);
+            color: var(--white);
+            padding: 1rem;
+            border-radius: 50%;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            cursor: pointer;
+        }
+
+        .live-chat:hover {
+            background: var(--secondary-color);
+        }
+
+        /* AI Stats Section */
+        .ai-stats {
+            padding: 4rem 2rem;
+            background: var(--gradient);
+            color: var(--white);
+            text-align: center;
+        }
+
+        .ai-stats h2 {
+            margin-bottom: 2rem;
+        }
+
+        .ai-stats .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .ai-stats .stat {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 1.5rem;
+            border-radius: 1rem;
+        }
+
+        .ai-stats .stat h3 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .ai-stats .stat p {
+            font-size: 1rem;
+        }
+
+        /* Video Demo Section */
+        .video-demo {
+            padding: 4rem 2rem;
+            background: var(--light-bg);
+            text-align: center;
+        }
+
+        .video-demo h2 {
+            margin-bottom: 2rem;
+        }
+
+        .video-container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .video-container iframe {
+            width: 100%;
+            height: 400px;
             border-radius: 8px;
-            min-height: 200px;
         }
 
-        #content-display span {
-            opacity: 0;
-            animation: fadeIn 0.5s forwards;
+        /* Blurred Class Selection */
+        .blurred {
+            filter: blur(5px);
+            pointer-events: none;
         }
 
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
+        /* Testimonials Scroll Animation */
+        .testimonials-scroll {
+            display: flex;
+            overflow-x: auto;
+            scroll-snap-type: x mandatory;
+            gap: 1.5rem;
+            padding-bottom: 1rem;
         }
-        `;
+
+        .testimonials-scroll .testimonial-card {
+            flex: 0 0 auto;
+            scroll-snap-align: start;
+            width: 300px;
+        }
+
+        /* AI Stats Counter Animation */
+        @keyframes countUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .stat h3 {
+            animation: countUp 1s ease-out;
+        }
+
+        /* About Developers Section */
+        .about-developers {
+            padding: 4rem 2rem;
+            background: var(--light-bg);
+            text-align: center;
+        }
+
+        .about-developers h2 {
+            margin-bottom: 2rem;
+        }
+
+        .developers-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .developer-card {
+            background: var(--white);
+            padding: 1.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+        }
+
+        .developer-card img {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            object-fit: cover;
+            margin-bottom: 1rem;
+        }
+
+        .developer-card h3 {
+            margin-bottom: 0.5rem;
+        }
+
+        .developer-card p {
+            font-style: italic;
+            color: var(--text-light);
+        }
+
+        .developer-card .social-links {
+            margin-top: 1rem;
+        }
+
+        .developer-card .social-links a {
+            color: var(--primary-color);
+            margin: 0 0.5rem;
+            font-size: 1.5rem;
+        }
+
+        .developer-card .social-links a:hover {
+            color: var(--secondary-color);
+        }
+
+        /* What's New Section */
+        .whats-new {
+            padding: 4rem 2rem;
+            background: var(--light-bg);
+            text-align: center;
+        }
+
+        .whats-new h2 {
+            margin-bottom: 2rem;
+        }
+
+        .whats-new .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .whats-new .card {
+            background: var(--white);
+            padding: 1.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .whats-new .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);
+        }
+
+        .whats-new .card h3 {
+            margin-bottom: 1rem;
+        }
+
+        .whats-new .card p {
+            font-size: 1rem;
+            color: var(--text-light);
+        }
+
+        /* Learning Path Navigation */
+        .learning-path-nav {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 1rem;
+        }
+
+        .learning-path-nav .button {
+            width: 48%;
+        }
     </style>
 </head>
 <body>
@@ -461,7 +984,6 @@ HTML_TEMPLATE = '''
                 <li><a onclick="showPage('home')"><i class="fas fa-home"></i> Home</a></li>
                 <li><a onclick="showPage('features')"><i class="fas fa-star"></i> Features</a></li>
                 <li><a onclick="showPage('learning-path')"><i class="fas fa-road"></i> Learning Path</a></li>
-             
                 <li class="dropdown">
                     <a id="authButton"><i class="fas fa-user"></i> Profile</a>
                     <div class="dropdown-content">
@@ -480,8 +1002,217 @@ HTML_TEMPLATE = '''
             <section class="hero">
                 <h1>Transform Your Learning Journey</h1>
                 <p>Welcome to TutorTeach.ai - Your AI-powered learning companion that adapts to your unique needs.</p>
-                <button class="button" onclick="showPage('learning-path')">Start Learning Now</button>
+                <button class="button" onclick="startJourney()">Start Your Journey</button>
             </section>
+            <section class="why-choose-us">
+                <h2>Why Choose Us?</h2>
+                <div class="grid">
+                    <div class="card slide-in-left">
+                        <h2>Personalized Learning</h2>
+                        <p>AI-driven content tailored to your learning style and pace.</p>
+                    </div>
+                    <div class="card slide-in-right">
+                        <h2>Interactive Lessons</h2>
+                        <p>Engage with dynamic content and real-time feedback.</p>
+                    </div>
+                    <div class="card slide-in-left">
+                        <h2>Progress Tracking</h2>
+                        <p>Monitor your growth with detailed analytics and insights.</p>
+                    </div>
+                    <div class="card slide-in-right">
+                        <h2>AI-Generated Video Content</h2>
+                        <p>Generates tailored video lessons based on the user's selected topic, providing an engaging and dynamic learning experience.</p>
+                    </div>
+                    <div class="card slide-in-left">
+                        <h2>Knowledge Assessment</h2>
+                        <p>Creates fill-in-the-blank and other interactive questions to test user understanding of the selected topic, predicting scores based on responses.</p>
+                    </div>
+                    <div class="card slide-in-right">
+                        <h2>Strength and Weakness Analysis</h2>
+                        <p>Identifies the user’s stronger and weaker sections in the chosen topic to provide personalized insights for improvement.</p>
+                    </div>
+                    <div class="card slide-in-left">
+                        <h2>Focused Remedial Content</h2>
+                        <p>Generates additional video solutions focusing on weaker sections, ensuring comprehensive understanding and mastery of the topic.</p>
+                    </div>
+                    <div class="card slide-in-right">
+                        <h2>Holistic Learning Support</h2>
+                        <p>Monitors individual performance to teach values, ethics, discipline, and communication skills alongside academic content, fostering overall development.</p>
+                    </div>
+                </div>
+            </section>
+            <section class="testimonials">
+                <h2>What Our Users Say</h2>
+                <div class="testimonials-scroll">
+                    <div class="testimonial-card">
+                        <img src="https://via.placeholder.com/80" alt="User 1">
+                        <h3>John Doe</h3>
+                        <p>"TutorTeach.ai has completely transformed the way I learn. The personalized lessons are amazing!"</p>
+                    </div>
+                    <div class="testimonial-card">
+                        <img src="https://via.placeholder.com/80" alt="User 2">
+                        <h3>Jane Smith</h3>
+                        <p>"The AI-generated videos are so engaging. I’ve never enjoyed learning this much before!"</p>
+                    </div>
+                    <div class="testimonial-card">
+                        <img src="https://via.placeholder.com/80" alt="User 3">
+                        <h3>Alice Johnson</h3>
+                        <p>"The progress tracking feature helps me stay motivated and focused on my goals."</p>
+                    </div>
+                    <div class="testimonial-card">
+                        <img src="https://via.placeholder.com/80" alt="User 4">
+                        <h3>Bob Brown</h3>
+                        <p>"The AI-driven content is tailored perfectly to my learning style. Highly recommended!"</p>
+                    </div>
+                    <div class="testimonial-card">
+                        <img src="https://via.placeholder.com/80" alt="User 5">
+                        <h3>Charlie Davis</h3>
+                        <p>"The interactive lessons and real-time feedback have made learning so much more effective."</p>
+                    </div>
+                </div>
+            </section>
+            <section class="ai-stats">
+                <h2>AI Stats</h2>
+                <div class="stats-grid">
+                    <div class="stat">
+                        <h3 id="topics-covered">0</h3>
+                        <p>Topics Covered</p>
+                    </div>
+                    <div class="stat">
+                        <h3 id="students-benefited">0</h3>
+                        <p>Students Benefited</p>
+                    </div>
+                    <div class="stat">
+                        <h3 id="satisfaction-rate">0</h3>
+                        <p>Satisfaction Rate</p>
+                    </div>
+                </div>
+            </section>
+            <section class="video-demo">
+                <h2>How It Works</h2>
+                <div class="video-container">
+                    <iframe width="100%" height="400" src="https://www.youtube.com/embed/zHiKFSBO_JE" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                </div>
+            </section>
+            <section class="about-developers">
+                <h2>About Developers</h2>
+                <div class="developers-grid">
+                    <div class="developer-card">
+                        <img src="https://i.ibb.co/6Nr58md/myprofile1.jpg" alt="My Profile">
+                        <h3>J Madhan</h3>
+                        <p>AI & Machine Learning Expert, GEN_AI Explorer </p>
+                        <div class="social-links">
+                            <a href="https://www.linkedin.com/in/j-madhan-6b90a32b1" target="_blank"><i class="fab fa-linkedin"></i></a>
+                            <a href="https://www.instagram.com/_officialmadhan?igsh=ZjFjaXg3a21jZmw0" target="_blank"><i class="fab fa-instagram"></i></a>
+                        </div>
+                    </div>
+                    <div class="developer-card">
+                        <img src="https://i.postimg.cc/50qpjsc6/ram.jpg" alt="profile">
+                        <h3> N L Ram Charan Teja </h3>
+                        <p>Full Stack Developer</p>
+                        <div class="social-links">
+                            <a href="https://www.linkedin.com/in/n-l-ram-charan-teja-ba2b25288/" target="_blank"><i class="fab fa-linkedin"></i></a>
+                            <a href="https://www.instagram.com/ramcharanteja_nl?igsh=MWJncmNhNnpuNDVndQ==" target="_blank"><i class="fab fa-instagram"></i></a>
+                        </div>
+                    </div>
+                    <div class="developer-card">
+                        <img src="https://via.placeholder.com/100" alt="Developer 3">
+                        <h3>Alice Johnson</h3>
+                        <p>UI/UX Designer</p>
+                        <div class="social-links">
+                            <a href="https://linkedin.com/in/alicejohnson" target="_blank"><i class="fab fa-linkedin"></i></a>
+                            <a href="https://instagram.com/alicejohnson" target="_blank"><i class="fab fa-instagram"></i></a>
+                        </div>
+                    </div>
+                    <div class="developer-card">
+                        <img src="https://via.placeholder.com/100" alt="Developer 4">
+                        <h3>Bob Brown</h3>
+                        <p>Backend Developer</p>
+                        <div class="social-links">
+                            <a href="https://linkedin.com/in/bobbrown" target="_blank"><i class="fab fa-linkedin"></i></a>
+                            <a href="https://instagram.com/bobbrown" target="_blank"><i class="fab fa-instagram"></i></a>
+                        </div>
+                    </div>
+                    <div class="developer-card">
+                        <img src="https://via.placeholder.com/100" alt="Developer 5">
+                        <h3>Charlie Davis</h3>
+                        <p>DevOps Engineer</p>
+                        <div class="social-links">
+                            <a href="https://linkedin.com/in/charliedavis" target="_blank"><i class="fab fa-linkedin"></i></a>
+                            <a href="https://instagram.com/charliedavis" target="_blank"><i class="fab fa-instagram"></i></a>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            <section class="contact-us">
+                <h2>Contact Us</h2>
+                <div class="contact-form">
+                    <form onsubmit="handleContactForm(event)">
+                        <div class="form-group">
+                            <label for="contactName">Name</label>
+                            <input type="text" id="contactName" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="contactEmail">Email</label>
+                            <input type="email" id="contactEmail" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="contactMessage">Message</label>
+                            <textarea id="contactMessage" required></textarea>
+                        </div>
+                        <button type="submit" class="button">Send Message</button>
+                    </form>
+                </div>
+            </section>
+            <section class="whats-new">
+                <h2>What's New</h2>
+                <div class="grid">
+                    <div class="card">
+                        <h3>Latest Innovations and Updates in AI and Technology</h3>
+                        <p>Explore advanced AI solutions like TutorTeach.ai and Teachmate.ai.</p>
+                    </div>
+                    <div class="card">
+                        <h3>AI-Based Learning Solutions</h3>
+                        <p>Real-time AI models for personalized education. Tools for assignment creation, video learning, and student progress tracking.</p>
+                    </div>
+                    <div class="card">
+                        <h3>Explore Our Features</h3>
+                        <p>Topic Selection: Choose from a wide range of educational topics. Video Generation: AI-generated video content for in-depth learning. Knowledge Assessment: Interactive quizzes and score prediction. Performance Insights: Identify strengths and weaknesses in learning. Customized Solutions: AI-based feedback to improve weak areas.</p>
+                    </div>
+                    <div class="card">
+                        <h3>For Educators and Institutions</h3>
+                        <p>Comprehensive Tools: Create, track, and enhance student engagement. Development Programs: Enhance teaching methodologies using AI. Integration Options: Seamlessly integrate with existing systems like Microsoft Teams and Azure.</p>
+                    </div>
+                    <div class="card">
+                        <h3>For Students and Parents</h3>
+                        <p>Exclusive deals on AI-based educational tools. Free access to Azure and learning platforms for students. Personalized learning experiences with real-time feedback.</p>
+                    </div>
+                    <div class="card">
+                        <h3>Developer & IT</h3>
+                        <p>Access APIs for AI video processing, student tracking, and quiz generation. Explore open-source tools like TensorFlow, Hugging Face, and Flask. Documentation and tutorials for seamless integration into educational environments.</p>
+                    </div>
+                    <div class="card">
+                        <h3>Get Involved</h3>
+                        <p>Participate in educational hackathons and competitions. Leverage cloud solutions for scalable learning platforms. Stay updated with community support and insights.</p>
+                    </div>
+                    <div class="card">
+                        <h3>About Us</h3>
+                        <p>Innovating education with AI-powered tools. Committed to privacy, sustainability, and accessibility. Partnering with global leaders to redefine learning experiences.</p>
+                    </div>
+                </div>
+            </section>
+            <div class="bubbles">
+                <li></li>
+                <li></li>
+                <li></li>
+                <li></li>
+                <li></li>
+                <li></li>
+                <li></li>
+                <li></li>
+                <li></li>
+                <li></li>
+            </div>
         </div>
 
         <!-- Features Page -->
@@ -489,17 +1220,37 @@ HTML_TEMPLATE = '''
             <section class="hero">
                 <h1>Our Features</h1>
                 <div class="grid">
-                    <div class="card">
+                    <div class="card slide-in-left">
                         <h2>Personalized Learning</h2>
                         <p>AI-driven content tailored to your learning style and pace.</p>
                     </div>
-                    <div class="card">
+                    <div class="card slide-in-right">
                         <h2>Interactive Lessons</h2>
                         <p>Engage with dynamic content and real-time feedback.</p>
                     </div>
-                    <div class="card">
+                    <div class="card slide-in-left">
                         <h2>Progress Tracking</h2>
                         <p>Monitor your growth with detailed analytics and insights.</p>
+                    </div>
+                    <div class="card slide-in-right">
+                        <h2>AI-Generated Video Content</h2>
+                        <p>Generates tailored video lessons based on the user's selected topic, providing an engaging and dynamic learning experience.</p>
+                    </div>
+                    <div class="card slide-in-left">
+                        <h2>Knowledge Assessment</h2>
+                        <p>Creates fill-in-the-blank and other interactive questions to test user understanding of the selected topic, predicting scores based on responses.</p>
+                    </div>
+                    <div class="card slide-in-right">
+                        <h2>Strength and Weakness Analysis</h2>
+                        <p>Identifies the user’s stronger and weaker sections in the chosen topic to provide personalized insights for improvement.</p>
+                    </div>
+                    <div class="card slide-in-left">
+                        <h2>Focused Remedial Content</h2>
+                        <p>Generates additional video solutions focusing on weaker sections, ensuring comprehensive understanding and mastery of the topic.</p>
+                    </div>
+                    <div class="card slide-in-right">
+                        <h2>Holistic Learning Support</h2>
+                        <p>Monitors individual performance to teach values, ethics, discipline, and communication skills alongside academic content, fostering overall development.</p>
                     </div>
                 </div>
             </section>
@@ -530,6 +1281,10 @@ HTML_TEMPLATE = '''
                     <video id="video-player" controls width="100%">
                         Your browser does not support the video tag.
                     </video>
+                    <div class="learning-path-nav">
+                        <button class="button" onclick="previousTopic()">Previous</button>
+                        <button class="button" onclick="nextTopic()" id="next-button" disabled>Next</button>
+                    </div>
                 </div>
             </div>
             <div id="navigation" class="hidden">
@@ -616,11 +1371,22 @@ HTML_TEMPLATE = '''
                         <label for="loginPassword">Password</label>
                         <input type="password" id="loginPassword" required>
                     </div>
+                    <div class="form-group">
+                        <label for="loginClass">Select Class</label>
+                        <select id="loginClass" required>
+                            <option value="8th">8th</option>
+                            <option value="9th">9th</option>
+                            <option value="10th">10th</option>
+                        </select>
+                    </div>
                     <button type="submit" class="button">Login</button>
                     <div id="loginMessage"></div>
                 </form>
                 <div class="auth-switch">
                    Don't have an account? <a onclick="showPage('register')">Register</a>
+                </div>
+                <div class="auth-switch">
+                    Forgot Password? <a onclick="showPage('forgot-password')">Reset Password</a>
                 </div>
             </div>
         </div>
@@ -646,6 +1412,14 @@ HTML_TEMPLATE = '''
                         <label for="confirmPassword">Confirm Password</label>
                         <input type="password" id="confirmPassword" required>
                     </div>
+                    <div class="form-group">
+                        <label for="registerClass">Select Class</label>
+                        <select id="registerClass" required>
+                            <option value="8th">8th</option>
+                            <option value="9th">9th</option>
+                            <option value="10th">10th</option>
+                        </select>
+                    </div>
                     <button type="submit" class="button">Register</button>
                     <div id="registerMessage"></div>
                 </form>
@@ -654,11 +1428,74 @@ HTML_TEMPLATE = '''
                 </div>
             </div>
         </div>
+
+        <!-- Forgot Password Page -->
+        <div id="forgot-password-page" class="page">
+            <div class="auth-container">
+                <h2 class="text-2xl font-bold mb-4 text-center">Forgot Password</h2>
+                <form class="auth-form" onsubmit="handleForgotPassword(event)">
+                    <div class="form-group">
+                        <label for="forgotEmail">Email</label>
+                        <input type="email" id="forgotEmail" required>
+                    </div>
+                    <button type="submit" class="button">Send OTP</button>
+                    <div id="forgotMessage"></div>
+                </form>
+                <div class="auth-switch">
+                    Remember your password? <a onclick="showPage('login')">Login</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Reset Password Page -->
+        <div id="reset-password-page" class="page">
+            <div class="auth-container">
+                <h2 class="text-2xl font-bold mb-4 text-center">Reset Password</h2>
+                <form class="auth-form" onsubmit="handleResetPassword(event)">
+                    <div class="form-group">
+                        <label for="resetOTP">OTP</label>
+                        <input type="text" id="resetOTP" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="newPassword">New Password</label>
+                        <input type="password" id="newPassword" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="confirmNewPassword">Confirm New Password</label>
+                        <input type="password" id="confirmNewPassword" required>
+                    </div>
+                    <button type="submit" class="button">Reset Password</button>
+                    <div id="resetMessage"></div>
+                </form>
+            </div>
+        </div>
     </main>
 
-    <!-- Your HTML structure remains the same -->
+    <!-- Footer Section -->
+    <footer>
+        <div class="footer-links">
+            <a href="#">Terms of Service</a>
+            <a href="#">Privacy Policy</a>
+            <a href="#">FAQs</a>
+        </div>
+        <div class="social-icons">
+            <a href="#"><i class="fab fa-linkedin"></i></a>
+            <a href="#"><i class="fab fa-twitter"></i></a>
+            <a href="#"><i class="fab fa-facebook"></i></a>
+            <a href="#"><i class="fab fa-instagram"></i></a>
+        </div>
+        <div class="copyright">
+            © 2025 TutorTeach.ai. All Rights Reserved.
+        </div>
+    </footer>
+
+    <!-- Live Chat Icon -->
+    <div class="live-chat" onclick="openChat()">
+        <i class="fas fa-comment"></i>
+    </div>
+
     <script>
-     // Global variables
+        // State management
         let currentClass = null;
         let currentSubject = null;
         let currentTopic = null;
@@ -668,24 +1505,9 @@ HTML_TEMPLATE = '''
         let isMobileMenuOpen = false;
         let users = JSON.parse(localStorage.getItem('users')) || [];
         let currentUser = JSON.parse(localStorage.getItem('currentUser'));
+        let otp = null;
 
-        // Core page navigation function
-        function showPage(pageId) {
-            document.querySelectorAll('.page').forEach(page => {
-                page.classList.remove('active');
-            });
-            
-            const targetPage = document.getElementById(`${pageId}-page`);
-            if (targetPage) {
-                targetPage.classList.add('active');
-            }
-
-            if (pageId === 'learning-path') {
-                initLearningPath();
-            }
-        }
-
-        // Auth button update
+        // Update auth button based on login status
         function updateAuthButton() {
             const authButton = document.getElementById('authButton');
             if (currentUser) {
@@ -695,46 +1517,197 @@ HTML_TEMPLATE = '''
             }
         }
 
-        // Learning path functions
+        // Show Profile Page
+        function showProfile() {
+            if (!currentUser) {
+                showPage('login');
+                return;
+            }
+            document.getElementById('registeredName').value = currentUser.name;
+            document.getElementById('displayName').value = currentUser.displayName || currentUser.name;
+            document.getElementById('profileEmail').value = currentUser.email;
+            showPage('profile');
+        }
+
+        // Show Dashboard Page
+        function showDashboard() {
+            if (!currentUser) {
+                showPage('login');
+                return;
+            }
+            // Example data for dashboard (you can replace this with actual data)
+            document.getElementById('lessons-completed').textContent = '5';
+            document.getElementById('lessons-ongoing').textContent = '3';
+            document.getElementById('progress-percentage').textContent = '50%';
+            showPage('dashboard');
+        }
+
+        // Handle registration
+        function handleRegister(event) {
+            event.preventDefault();
+            const messageDiv = document.getElementById('registerMessage');
+            const name = document.getElementById('registerName').value;
+            const email = document.getElementById('registerEmail').value;
+            const password = document.getElementById('registerPassword').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+            const selectedClass = document.getElementById('registerClass').value;
+
+            if (password !== confirmPassword) {
+                messageDiv.className = 'error-message';
+                messageDiv.textContent = 'Passwords do not match!';
+                return;
+            }
+
+            if (users.some(user => user.email === email)) {
+                messageDiv.className = 'error-message';
+                messageDiv.textContent = 'Email already registered!';
+                return;
+            }
+
+            users.push({ name, email, password, class: selectedClass });
+            localStorage.setItem('users', JSON.stringify(users));
+            
+            messageDiv.className = 'success-message';
+            messageDiv.textContent = 'Registration successful! Redirecting to login...';
+            
+            // Send registration confirmation email
+            sendEmail(email, 'Registration Successful', 'You have successfully registered to TutorTeach.ai.');
+            
+            setTimeout(() => {
+                showPage('login');
+            }, 2000);
+        }
+
+        // Handle login
+        function handleLogin(event) {
+            event.preventDefault();
+            const messageDiv = document.getElementById('loginMessage');
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            const selectedClass = document.getElementById('loginClass').value;
+
+            const user = users.find(u => u.email === email && u.password === password);
+            
+            if (user) {
+                currentUser = user;
+                currentUser.class = selectedClass; // Update user's class
+                localStorage.setItem('currentUser', JSON.stringify(user));
+                updateAuthButton();
+                
+                messageDiv.className = 'success-message';
+                messageDiv.textContent = 'Login successful! Redirecting...';
+                
+                setTimeout(() => {
+                    showPage('learning-path');
+                }, 1000);
+            } else {
+                messageDiv.className = 'error-message';
+                messageDiv.textContent = 'Invalid email or password!';
+            }
+        }
+
+        // Handle logout
+        function logout() {
+            currentUser = null;
+            localStorage.removeItem('currentUser');
+            updateAuthButton();
+            showPage('home');
+        }
+
+        // Handle forgot password
+        function handleForgotPassword(event) {
+            event.preventDefault();
+            const messageDiv = document.getElementById('forgotMessage');
+            const email = document.getElementById('forgotEmail').value;
+
+            const user = users.find(u => u.email === email);
+            
+            if (user) {
+                otp = generateOTP();
+                sendEmail(email, 'Password Reset OTP', `Your OTP for password reset is: ${otp}`);
+                
+                messageDiv.className = 'success-message';
+                messageDiv.textContent = 'OTP sent to your email.';
+                showPage('reset-password');
+            } else {
+                messageDiv.className = 'error-message';
+                messageDiv.textContent = 'Email not found!';
+            }
+        }
+
+        // Handle reset password
+        function handleResetPassword(event) {
+            event.preventDefault();
+            const messageDiv = document.getElementById('resetMessage');
+            const enteredOTP = document.getElementById('resetOTP').value;
+            const newPassword = document.getElementById('newPassword').value;
+            const confirmNewPassword = document.getElementById('confirmNewPassword').value;
+
+            if (enteredOTP !== otp) {
+                messageDiv.className = 'error-message';
+                messageDiv.textContent = 'Invalid OTP!';
+                return;
+            }
+
+            if (newPassword !== confirmNewPassword) {
+                messageDiv.className = 'error-message';
+                messageDiv.textContent = 'Passwords do not match!';
+                return;
+            }
+
+            const user = users.find(u => u.email === document.getElementById('forgotEmail').value);
+            user.password = newPassword;
+            localStorage.setItem('users', JSON.stringify(users));
+            
+            messageDiv.className = 'success-message';
+            messageDiv.textContent = 'Password reset successful! Redirecting to login...';
+            
+            setTimeout(() => {
+                showPage('login');
+            }, 2000);
+        }
+
+        // Generate OTP
+        function generateOTP() {
+            return Math.floor(100000 + Math.random() * 900000).toString();
+        }
+
+        // Send email
+        function sendEmail(to, subject, body) {
+            const msg = Message(subject, recipients=[to], body=body);
+            mail.send(msg);
+        }
+
+        // Initialize the learning path
         function initLearningPath() {
+            renderClasses();
+            updateBreadcrumb();
+        }
+
+        // Render class selection
+        function renderClasses() {
             fetch('/api/classes')
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('Network response was not ok');
-                    }
-                    return response.json();
-                })
+                .then(response => response.json())
                 .then(data => {
-                    console.log('Classes data:', data);
-                    renderClasses(data);
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('Error loading classes. Please try again later.');
+                    const container = document.getElementById('class-selection');
+                    container.innerHTML = Object.keys(data.classes).map(className => `
+                        <div class="card ${currentUser && currentUser.class !== className ? 'blurred' : ''}" onclick="selectClass('${className}')">
+                            <h2 class="card-title">Class ${className}</h2>
+                            <p class="card-content">Explore subjects and topics for Class ${className}</p>
+                        </div>
+                    `).join('');
                 });
         }
 
-        function renderClasses(data) {
-            const container = document.getElementById('class-selection');
-            if (!container) return;
-            
-            container.innerHTML = Object.keys(data.classes).map(className => `
-                <div class="card" onclick="selectClass('${className}')">
-                    <h2 class="card-title">Class ${className}</h2>
-                    <p class="card-content">Start your ${className} grade journey</p>
-                </div>
-            `).join('');
-            
-            showSection('class-selection');
-        }
-
+        // Select a class
         function selectClass(className) {
+            if (currentUser && currentUser.class !== className) {
+                alert('You can only access your registered class.');
+                return;
+            }
             currentClass = className;
             fetch(`/api/subjects/${className}`)
-                .then(response => {
-                    if (!response.ok) throw new Error('Network response was not ok');
-                    return response.json();
-                })
+                .then(response => response.json())
                 .then(data => {
                     const container = document.getElementById('subject-selection');
                     container.innerHTML = Object.keys(data.subjects).map(subject => `
@@ -746,20 +1719,18 @@ HTML_TEMPLATE = '''
                     
                     showSection('subject-selection');
                     updateBreadcrumb();
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('Error loading subjects. Please try again later.');
                 });
         }
 
+        // Select a subject
         function selectSubject(subject) {
+            if (!currentUser) {
+                showPage('login');
+                return;
+            }
             currentSubject = subject;
             fetch(`/api/topics/${currentClass}/${subject}`)
-                .then(response => {
-                    if (!response.ok) throw new Error('Network response was not ok');
-                    return response.json();
-                })
+                .then(response => response.json())
                 .then(data => {
                     const container = document.getElementById('topic-selection');
                     container.innerHTML = data.topics.map(topic => `
@@ -771,104 +1742,126 @@ HTML_TEMPLATE = '''
                     
                     showSection('topic-selection');
                     updateBreadcrumb();
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('Error loading topics. Please try again later.');
                 });
         }
 
+        // Select a topic
         function selectTopic(topic) {
             currentTopic = topic;
-            fetch(`/api/content/${encodeURIComponent(topic)}`)
-                .then(response => {
-                    if (!response.ok) throw new Error('Network response was not ok');
-                    return response.json();
-                })
+            fetch(`/api/content/${topic}`)
+                .then(response => response.json())
                 .then(data => {
-                    document.getElementById('content-title').textContent = topic;
-                    document.getElementById('content-display').textContent = data.content;
-                    document.getElementById('mark-complete-button').disabled = false;
-                    showSection('content-section');
-                    updateBreadcrumb();
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('Error loading content. Please try again later.');
+                    if (data.content) {
+                        document.getElementById('topic-selection').classList.add('hidden');
+                        document.getElementById('content-section').classList.remove('hidden');
+                        displayContentWordByWord(data.content);
+                    } else {
+                        alert('No content available for this topic.');
+                    }
                 });
+            updateBreadcrumb();
         }
 
-        // Video handling
+        // Display content word by word
+        function displayContentWordByWord(content) {
+            const contentContainer = document.getElementById('content-display');
+            contentContainer.innerHTML = ''; // Clear previous content
+            const words = content.split(' ');
+            let index = 0;
+
+            const interval = setInterval(() => {
+                if (index >= words.length) {
+                    clearInterval(interval);
+                    document.getElementById('mark-complete-button').disabled = false; // Enable "Mark as Complete" button
+                    return;
+                }
+                contentContainer.innerHTML += words[index] + ' ';
+                index++;
+            }, 100); // Adjust speed as needed
+        }
+
+        // Mark a topic as complete
         function markComplete() {
             contentComplete = true;
             document.getElementById('content-section').classList.add('hidden');
             document.getElementById('video-section').classList.remove('hidden');
-            
             fetch(`/api/video/${currentTopic}`)
-                .then(response => {
-                    if (!response.ok) throw new Error('Network response was not ok');
-                    return response.json();
-                })
+                .then(response => response.json())
                 .then(data => {
                     if (data.video_path) {
                         const videoPlayer = document.getElementById('video-player');
                         videoPlayer.src = `/videos/${data.video_path}`;
-                        videoPlayer.onerror = function() {
-                            console.error('Video loading error');
-                            alert('Error loading video. Please try again later.');
-                        };
                         videoPlayer.load();
-                        videoPlayer.play().catch(e => console.error('Video playback error:', e));
+                        videoPlayer.play();
+                        document.getElementById('next-button').disabled = false; // Enable "Next" button
                     } else {
                         alert('No video available for this topic.');
                     }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('Error loading video. Please try again later.');
                 });
         }
 
-        // Navigation and section management
-        function showSection(sectionId) {
-            ['class-selection', 'subject-selection', 'topic-selection', 'content-section', 'video-section'].forEach(id => {
-                const element = document.getElementById(id);
-                if (element) {
-                    element.classList.add('hidden');
-                }
-            });
-            
-            const targetSection = document.getElementById(sectionId);
-            if (targetSection) {
-                targetSection.classList.remove('hidden');
-            }
-            
-            const navigation = document.getElementById('navigation');
-            if (navigation) {
-                navigation.classList.toggle('hidden', sectionId === 'class-selection');
+        // Navigate to the next topic
+        function nextTopic() {
+            const topics = education_data['classes'][currentClass]['subjects'][currentSubject]['topics'];
+            const currentIndex = topics.indexOf(currentTopic);
+            if (currentIndex < topics.length - 1) {
+                selectTopic(topics[currentIndex + 1]);
+            } else {
+                alert('No more topics in this subject.');
             }
         }
 
-        function goBack() {
-            if (document.getElementById('video-section').classList.contains('hidden') === false) {
-                document.getElementById('video-section').classList.add('hidden');
-                document.getElementById('content-section').classList.remove('hidden');
+        // Navigate to the previous topic
+        function previousTopic() {
+            const topics = education_data['classes'][currentClass]['subjects'][currentSubject]['topics'];
+            const currentIndex = topics.indexOf(currentTopic);
+            if (currentIndex > 0) {
+                selectTopic(topics[currentIndex - 1]);
+            } else {
+                alert('This is the first topic.');
+            }
+        }
+
+        // Show page function
+        function showPage(pageId) {
+            // If trying to access learning path while not logged in
+            if (pageId === 'learning-path' && !currentUser) {
+                showPage('login');
                 return;
             }
+
+            document.querySelectorAll('.page').forEach(page => {
+                page.classList.remove('active');
+            });
+            document.getElementById(pageId + '-page').classList.add('active');
             
+            if (pageId === 'learning-path') {
+                initLearningPath();
+            }
+            
+            if (isMobileMenuOpen) {
+                document.querySelector('nav ul').classList.remove('active');
+                isMobileMenuOpen = false;
+            }
+        }
+
+        // Navigation
+        function goBack() {
             if (currentTopic) {
                 currentTopic = null;
-                selectSubject(currentSubject);
+                showSection('topic-selection');
             } else if (currentSubject) {
                 currentSubject = null;
-                selectClass(currentClass);
+                showSection('subject-selection');
             } else if (currentClass) {
                 currentClass = null;
                 showSection('class-selection');
+                document.getElementById('navigation').classList.add('hidden');
             }
             updateBreadcrumb();
         }
 
+        // Update breadcrumb
         function updateBreadcrumb() {
             const breadcrumb = document.getElementById('breadcrumb');
             let path = [];
@@ -878,274 +1871,94 @@ HTML_TEMPLATE = '''
             breadcrumb.textContent = path.join(' → ');
         }
 
-        // Auth functions
-        function handleLogin(event) {
-            event.preventDefault();
-            const email = document.getElementById('loginEmail').value;
-            const password = document.getElementById('loginPassword').value;
-            
-            const user = users.find(u => u.email === email && u.password === password);
-            if (user) {
-                currentUser = user;
-                localStorage.setItem('currentUser', JSON.stringify(user));
-                updateAuthButton();
-                showPage('home');
-            } else {
-                document.getElementById('loginMessage').textContent = 'Invalid email or password';
-            }
-        }
-
-        function handleRegister(event) {
-            event.preventDefault();
-            const name = document.getElementById('registerName').value;
-            const email = document.getElementById('registerEmail').value;
-            const password = document.getElementById('registerPassword').value;
-            const confirmPassword = document.getElementById('confirmPassword').value;
-            
-            if (password !== confirmPassword) {
-                document.getElementById('registerMessage').textContent = 'Passwords do not match';
-                return;
-            }
-            
-            if (users.some(u => u.email === email)) {
-                document.getElementById('registerMessage').textContent = 'Email already registered';
-                return;
-            }
-            
-            const newUser = { name, email, password, displayName: name };
-            users.push(newUser);
-            localStorage.setItem('users', JSON.stringify(users));
-            
-            currentUser = newUser;
-            localStorage.setItem('currentUser', JSON.stringify(newUser));
-            updateAuthButton();
-            showPage('home');
-        }
-
-        // Profile functions
-        function showProfile() {
-            if (!currentUser) {
-                showPage('login');
-                return;
-            }
-            
-            document.getElementById('registeredName').value = currentUser.name;
-            document.getElementById('displayName').value = currentUser.displayName || currentUser.name;
-            document.getElementById('profileEmail').value = currentUser.email;
-            showPage('profile');
-        }
-
-        function showDashboard() {
-            if (!currentUser) {
-                showPage('login');
-                return;
-            }
-            showPage('dashboard');
-        }
-
-        function logout() {
-            currentUser = null;
-            localStorage.removeItem('currentUser');
-            updateAuthButton();
-            showPage('home');
-        }
-
-        // Initialize the application
-        document.addEventListener('DOMContentLoaded', function() {
-            updateAuthButton();
-            const menuToggle = document.querySelector('.menu-toggle');
-            if (menuToggle) {
-                menuToggle.addEventListener('click', () => {
-                    const navUl = document.querySelector('nav ul');
-                    navUl.classList.toggle('active');
-                    isMobileMenuOpen = !isMobileMenuOpen;
-                });
-            }
-
-            // Initial check for mobile menu
-            if (window.innerWidth <= 768) {
-                const menuToggle = document.querySelector('.menu-toggle');
-                if (menuToggle) {
-                    menuToggle.style.display = 'block';
-                }
-            }
-        });
-        // Add these functions to your existing JavaScript
-
-        function typeWriter(text, elementId, speed = 200) {
-            const element = document.getElementById(elementId);
-            if (!element) return;
-            
-            // Clear any existing content
-            element.textContent = '';
-            
-            // Split the text into words and add spaces back
-            const words = text.split(' ').map(word => word + ' ');
-            let wordIndex = 0;
-            
-            // Create a span for the cursor
-            const cursorSpan = document.createElement('span');
-            cursorSpan.className = 'typing-cursor';
-            cursorSpan.textContent = '|';
-            element.appendChild(cursorSpan);
-
-            function typeNextWord() {
-                if (wordIndex < words.length) {
-                    const wordSpan = document.createElement('span');
-                    wordSpan.textContent = words[wordIndex];
-                    element.insertBefore(wordSpan, cursorSpan);
-                    wordIndex++;
-                    
-                    // Schedule the next word
-                    setTimeout(typeNextWord, speed);
-                } else {
-                    // Remove cursor when typing is complete
-                    cursorSpan.remove();
-                    // Enable the mark complete button
-                    document.getElementById('mark-complete-button').disabled = false;
-                }
-            }
-
-            // Start typing
-            typeNextWord();
-        }
-
-        // Modify the existing selectTopic function
-        function selectTopic(topic) {
-            currentTopic = topic;
-            fetch(`/api/content/${encodeURIComponent(topic)}`)
-                .then(response => {
-                    if (!response.ok) throw new Error('Network response was not ok');
-                    return response.json();
-                })
-                .then(data => {
-                    document.getElementById('content-title').textContent = topic;
-                    document.getElementById('mark-complete-button').disabled = true;
-                    showSection('content-section');
-                    updateBreadcrumb();
-                    
-                    // Use the typeWriter function instead of direct assignment
-                    typeWriter(data.content, 'content-display');
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('Error loading content. Please try again later.');
-                });
-        }
-
-        
-
-        // Add the styles to the document
-        document.addEventListener('DOMContentLoaded', function() {
-            // Add the new styles
-            const styleSheet = document.createElement("style");
-            styleSheet.textContent = additionalStyles;
-            document.head.appendChild(styleSheet);
-            
-            // Rest of your existing DOMContentLoaded code...
-        });
-        // Add these functions to your existing JavaScript
-
-        // Function to check if user is authenticated
-        function isAuthenticated() {
-            return currentUser !== null;
-        }
-
-        // Modify the existing showPage function
-        function showPage(pageId) {
-            // Check if trying to access protected pages
-            if (pageId === 'learning-path' || pageId === 'dashboard') {
-                if (!isAuthenticated()) {
-                    // Store the intended destination
-                    localStorage.setItem('intendedDestination', pageId);
-                    // Redirect to login
-                    const targetPage = document.getElementById('login-page');
-                    document.querySelectorAll('.page').forEach(page => {
-                        page.classList.remove('active');
-                    });
-                    targetPage.classList.add('active');
-                    return;
-                }
-            }
-
-            // Regular page navigation
-            document.querySelectorAll('.page').forEach(page => {
-                page.classList.remove('active');
+        // Show/hide sections
+        function showSection(sectionId) {
+            ['class-selection', 'subject-selection', 'topic-selection', 'content-section', 'video-section'].forEach(id => {
+                document.getElementById(id).classList.add('hidden');
             });
-            
-            const targetPage = document.getElementById(`${pageId}-page`);
-            if (targetPage) {
-                targetPage.classList.add('active');
-            }
-
-            if (pageId === 'learning-path') {
-                initLearningPath();
-            }
+            document.getElementById(sectionId).classList.remove('hidden');
+            document.getElementById('navigation').classList.remove('hidden');
         }
 
-        // Modify the handleLogin function
-        function handleLogin(event) {
+        // Initialize auth state and mobile menu
+        updateAuthButton();
+        const menuToggle = document.querySelector('.menu-toggle');
+        menuToggle.addEventListener('click', () => {
+            const navUl = document.querySelector('nav ul');
+            navUl.classList.toggle('active');
+            isMobileMenuOpen = !isMobileMenuOpen;
+        });
+
+        // Initial check for mobile menu
+        if (window.innerWidth <= 768) {
+            menuToggle.style.display = 'block';
+        }
+
+        // Open live chat
+        function openChat() {
+            alert("Live chat feature coming soon!");
+        }
+
+        // Handle contact form submission
+        function handleContactForm(event) {
             event.preventDefault();
-            const email = document.getElementById('loginEmail').value;
-            const password = document.getElementById('loginPassword').value;
-            
-            const user = users.find(u => u.email === email && u.password === password);
-            if (user) {
-                currentUser = user;
-                localStorage.setItem('currentUser', JSON.stringify(user));
-                updateAuthButton();
-                
-                // Check for intended destination
-                const intendedDestination = localStorage.getItem('intendedDestination');
-                localStorage.removeItem('intendedDestination');
-                
-                // Redirect to intended page or home
-                showPage(intendedDestination || 'home');
+            const name = document.getElementById('contactName').value;
+            const email = document.getElementById('contactEmail').value;
+            const message = document.getElementById('contactMessage').value;
+
+            // Send email to TutorTeach.ai
+            sendEmail('tutorteach.ai@gmail.com', 'New Contact Form Submission', `
+                Name: ${name}
+                Email: ${email}
+                Message: ${message}
+            `);
+
+            alert("Thank you for contacting us! We will get back to you soon.");
+        }
+
+        // AI Stats Counter Animation
+        function animateStats() {
+            const topicsCovered = document.getElementById('topics-covered');
+            const studentsBenefited = document.getElementById('students-benefited');
+            const satisfactionRate = document.getElementById('satisfaction-rate');
+
+            const stats = [
+                { element: topicsCovered, target: 100, duration: 2000 },
+                { element: studentsBenefited, target: 5000, duration: 2000 },
+                { element: satisfactionRate, target: 95, duration: 2000 }
+            ];
+
+            stats.forEach(stat => {
+                let start = 0;
+                const increment = stat.target / (stat.duration / 10);
+                const interval = setInterval(() => {
+                    start += increment;
+                    stat.element.textContent = Math.floor(start);
+                    if (start >= stat.target) {
+                        clearInterval(interval);
+                        stat.element.textContent = stat.target;
+                    }
+                }, 10);
+            });
+        }
+
+        // Initialize AI Stats Animation
+        animateStats();
+
+        // Start Journey Button
+        function startJourney() {
+            if (!currentUser) {
+                showPage('login');
             } else {
-                document.getElementById('loginMessage').textContent = 'Invalid email or password';
+                showPage('learning-path');
             }
         }
-
-        // Modify the handleRegister function
-        function handleRegister(event) {
-            event.preventDefault();
-            const name = document.getElementById('registerName').value;
-            const email = document.getElementById('registerEmail').value;
-            const password = document.getElementById('registerPassword').value;
-            const confirmPassword = document.getElementById('confirmPassword').value;
-            
-            if (password !== confirmPassword) {
-                document.getElementById('registerMessage').textContent = 'Passwords do not match';
-                return;
-            }
-            
-            if (users.some(u => u.email === email)) {
-                document.getElementById('registerMessage').textContent = 'Email already registered';
-                return;
-            }
-            
-            const newUser = { name, email, password, displayName: name };
-            users.push(newUser);
-            localStorage.setItem('users', JSON.stringify(users));
-            
-            currentUser = newUser;
-            localStorage.setItem('currentUser', JSON.stringify(newUser));
-            updateAuthButton();
-            
-            // Check for intended destination
-            const intendedDestination = localStorage.getItem('intendedDestination');
-            localStorage.removeItem('intendedDestination');
-            
-            // Redirect to intended page or home
-            showPage(intendedDestination || 'home');
-        }
-
-// Modify the menu click handlers in the HTML
-        
     </script>
 </body>
 </html>
 '''
+
+# Flask routes
 @app.route('/')
 def home():
     return render_template_string(HTML_TEMPLATE)
@@ -1162,21 +1975,35 @@ def get_subjects(class_name):
 
 @app.route('/api/topics/<class_name>/<subject>')
 def get_topics(class_name, subject):
-    try:
-        topics = education_data['classes'][class_name]['subjects'][subject]['topics']
-        return jsonify({"topics": topics})
-    except KeyError:
+    if class_name not in education_data['classes'] or \
+       subject not in education_data['classes'][class_name]['subjects']:
         return jsonify({"error": "Invalid class or subject"}), 404
+    return jsonify({"topics": education_data['classes'][class_name]['subjects'][subject]['topics']})
 
 @app.route('/api/content/<topic>')
 def get_content(topic):
-    content = content_db.get(topic, [None])[0]
-    return jsonify({"content": content})
+    if topic not in content_db:
+        return jsonify({"content": None})
+    return jsonify({"content": content_db[topic][0]})  # Return the first content item for simplicity
+
+@app.route('/api/video/<topic>')
+def get_video(topic):
+    video_path = f"{topic.lower().replace(' ', '_')}.mp4"
+    if os.path.exists(os.path.join(app.config['UPLOAD_FOLDER'], video_path)):
+        return jsonify({"video_path": video_path})
+    return jsonify({"video_path": None})
 
 @app.route('/videos/<path:filename>')
 def serve_video(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
+@app.errorhandler(404)
+def not_found_error(error):
+    return jsonify({"error": "Resource not found"}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({"error": "Internal server error"}), 500
+
 if __name__ == '__main__':
-    # Run on a single port (5000)
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)
