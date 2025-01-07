@@ -927,17 +927,17 @@ HTML_TEMPLATE = '''
             background: var(--light-bg);
             text-align: center;
         }
-
+        
         .whats-new h2 {
             margin-bottom: 2rem;
         }
-
+        
         .whats-new .grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 1.5rem;
         }
-
+        
         .whats-new .card {
             background: var(--white);
             padding: 1.5rem;
@@ -946,28 +946,27 @@ HTML_TEMPLATE = '''
             cursor: pointer;
             transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
-
+        
         .whats-new .card:hover {
             transform: translateY(-5px);
             box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);
         }
-
+        
         .whats-new .card h3 {
             margin-bottom: 1rem;
         }
-
         .whats-new .card p {
             font-size: 1rem;
             color: var(--text-light);
         }
-
+        
         /* Learning Path Navigation */
         .learning-path-nav {
             display: flex;
             justify-content: space-between;
             margin-top: 1rem;
         }
-
+        
         .learning-path-nav .button {
             width: 48%;
         }
@@ -1091,7 +1090,7 @@ HTML_TEMPLATE = '''
             <section class="video-demo">
                 <h2>How It Works</h2>
                 <div class="video-container">
-                    <iframe width="100%" height="400" src="https://www.kapwing.com/w/lr6rZFgfzl" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                    <iframe width="100%" height="400" src="https://www.youtube.com/embed/nKl2FgALO-c" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
                 </div>
             </section>
             <section class="about-developers">
@@ -1116,30 +1115,21 @@ HTML_TEMPLATE = '''
                         </div>
                     </div>
                     <div class="developer-card">
-                        <img src="https://via.placeholder.com/100" alt="Developer 3">
-                        <h3>Alice Johnson</h3>
+                        <img src="https://i.ibb.co/18XVx3D/Whats-App-Image-2025-01-07-at-21-09-01-6e1dc378.jpg" alt="Developer 3">
+                        <h3>M Praveen</h3>
                         <p>UI/UX Designer</p>
                         <div class="social-links">
-                            <a href="https://linkedin.com/in/alicejohnson" target="_blank"><i class="fab fa-linkedin"></i></a>
-                            <a href="https://instagram.com/alicejohnson" target="_blank"><i class="fab fa-instagram"></i></a>
+                            <a href="https://www.linkedin.com/in/m-praveen-kumar-64bb19315?utm_source=share&utm_campaign=share_via&utm_content=profile&utm_medium=android_app" target="_blank"><i class="fab fa-linkedin"></i></a>
+                            <a href="https://www.instagram.com/professional_praveen3?igsh=MzNwOTk2M2FwanE3" target="_blank"><i class="fab fa-instagram"></i></a>
                         </div>
                     </div>
                     <div class="developer-card">
-                        <img src="https://via.placeholder.com/100" alt="Developer 4">
-                        <h3>Bob Brown</h3>
+                        <img src="https://i.ibb.co/fMSncvP/Whats-App-Image-2025-01-07-at-20-57-53-31232a64.jpg" alt="Developer 4">
+                        <h3>K Harsha Vardhan</h3>
                         <p>Backend Developer</p>
                         <div class="social-links">
                             <a href="https://linkedin.com/in/bobbrown" target="_blank"><i class="fab fa-linkedin"></i></a>
-                            <a href="https://instagram.com/bobbrown" target="_blank"><i class="fab fa-instagram"></i></a>
-                        </div>
-                    </div>
-                    <div class="developer-card">
-                        <img src="https://via.placeholder.com/100" alt="Developer 5">
-                        <h3>Charlie Davis</h3>
-                        <p>DevOps Engineer</p>
-                        <div class="social-links">
-                            <a href="https://linkedin.com/in/charliedavis" target="_blank"><i class="fab fa-linkedin"></i></a>
-                            <a href="https://instagram.com/charliedavis" target="_blank"><i class="fab fa-instagram"></i></a>
+                            <a href="https://www.instagram.com/harsha_harry._?igsh=MWVpM3Vxanl0N2pkZQ==" target="_blank"><i class="fab fa-instagram"></i></a>
                         </div>
                     </div>
                 </div>
@@ -1220,37 +1210,100 @@ HTML_TEMPLATE = '''
             <section class="hero">
                 <h1>Our Features</h1>
                 <div class="grid">
-                    <div class="card slide-in-left">
+                    <!-- Personalized Learning -->
+                    <div class="feature-card slide-in-left">
+                        <div class="feature-icon">
+                            <i class="fas fa-user-graduate"></i>
+                        </div>
                         <h2>Personalized Learning</h2>
                         <p>AI-driven content tailored to your learning style and pace.</p>
+                        <div class="feature-explanation">
+                            <p>Our AI analyzes your learning patterns and adapts the content to match your strengths and weaknesses, ensuring a personalized learning experience.</p>
+                        </div>
                     </div>
-                    <div class="card slide-in-right">
+
+                    <!-- Interactive Lessons -->
+                    <div class="feature-card slide-in-right">
+                        <div class="feature-icon">
+                            <i class="fas fa-chalkboard-teacher"></i>
+                        </div>
                         <h2>Interactive Lessons</h2>
                         <p>Engage with dynamic content and real-time feedback.</p>
+                        <div class="feature-explanation">
+                            <p>Interactive lessons with quizzes, polls, and real-time feedback keep you engaged and help reinforce your understanding of the topic.</p>
+                        </div>
                     </div>
-                    <div class="card slide-in-left">
+
+                    <!-- Progress Tracking -->
+                    <div class="feature-card slide-in-left">
+                        <div class="feature-icon">
+                            <i class="fas fa-chart-line"></i>
+                        </div>
                         <h2>Progress Tracking</h2>
                         <p>Monitor your growth with detailed analytics and insights.</p>
+                        <div class="feature-explanation">
+                            <p>Track your progress with detailed analytics, including completed lessons, quiz scores, and time spent on each topic.</p>
+                        </div>
                     </div>
-                    <div class="card slide-in-right">
-                        <h2>AI-Generated Video Content</h2>
-                        <p>Generates tailored video lessons based on the user's selected topic, providing an engaging and dynamic learning experience.</p>
+
+                    <!-- AI-Generated Video -->
+                    <div class="feature-card slide-in-right">
+                        <div class="feature-icon">
+                            <i class="fas fa-video"></i>
+                        </div>
+                        <h2>AI-Generated Video</h2>
+                        <p>Generates tailored video lessons based on your selected topic.</p>
+                        <div class="feature-explanation">
+                            <p>Our AI creates custom video lessons tailored to your learning needs, making complex topics easier to understand.</p>
+                        </div>
                     </div>
-                    <div class="card slide-in-left">
+
+                    <!-- Knowledge Assessment -->
+                    <div class="feature-card slide-in-left">
+                        <div class="feature-icon">
+                            <i class="fas fa-question-circle"></i>
+                        </div>
                         <h2>Knowledge Assessment</h2>
-                        <p>Creates fill-in-the-blank and other interactive questions to test user understanding of the selected topic, predicting scores based on responses.</p>
+                        <p>Tests your understanding with interactive questions.</p>
+                        <div class="feature-explanation">
+                            <p>Take quizzes and tests to assess your knowledge. Our AI predicts your score and provides feedback to help you improve.</p>
+                        </div>
                     </div>
-                    <div class="card slide-in-right">
+
+                    <!-- Strength and Weakness Analysis -->
+                    <div class="feature-card slide-in-right">
+                        <div class="feature-icon">
+                            <i class="fas fa-balance-scale"></i>
+                        </div>
                         <h2>Strength and Weakness Analysis</h2>
-                        <p>Identifies the user’s stronger and weaker sections in the chosen topic to provide personalized insights for improvement.</p>
+                        <p>Identifies your stronger and weaker sections.</p>
+                        <div class="feature-explanation">
+                            <p>Our AI analyzes your performance to identify your strengths and weaknesses, helping you focus on areas that need improvement.</p>
+                        </div>
                     </div>
-                    <div class="card slide-in-left">
+
+                    <!-- Focused Remedial Content -->
+                    <div class="feature-card slide-in-left">
+                        <div class="feature-icon">
+                            <i class="fas fa-book-open"></i>
+                        </div>
                         <h2>Focused Remedial Content</h2>
-                        <p>Generates additional video solutions focusing on weaker sections, ensuring comprehensive understanding and mastery of the topic.</p>
+                        <p>Generates additional content for weaker sections.</p>
+                        <div class="feature-explanation">
+                            <p>Get additional video lessons and practice questions tailored to your weaker sections to ensure comprehensive understanding.</p>
+                        </div>
                     </div>
-                    <div class="card slide-in-right">
+
+                    <!-- Holistic Learning Support -->
+                    <div class="feature-card slide-in-right">
+                        <div class="feature-icon">
+                            <i class="fas fa-hands-helping"></i>
+                        </div>
                         <h2>Holistic Learning Support</h2>
-                        <p>Monitors individual performance to teach values, ethics, discipline, and communication skills alongside academic content, fostering overall development.</p>
+                        <p>Teaches values, ethics, and communication skills.</p>
+                        <div class="feature-explanation">
+                            <p>Beyond academics, our platform helps you develop values, ethics, discipline, and communication skills for overall growth.</p>
+                        </div>
                     </div>
                 </div>
             </section>
