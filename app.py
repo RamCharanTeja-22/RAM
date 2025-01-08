@@ -91,72 +91,73 @@ education_data = {
 # Content database
 content_db = {
     "Algebra Basics": [
-        "Algebraic Expressions: An algebraic expression is a combination of terms connected by addition, subtraction, multiplication, or division. Terms are parts of an expression separated by addition or subtraction. Coefficients are numbers multiplying variables in a term. Constants are fixed numbers without variables. Solve more complex equations and inequalities. Learn about polynomials and how to factor them. Explore quadratic equations and their graphs."
+        "Algebraic Expressions: An algebraic expression is a combination of terms connected by addition, subtraction, multiplication, or division. Terms are parts of an expression separated by addition or subtraction. Coefficients are numbers multiplying variables in a term. Constants are fixed numbers without variables. Learn to simplify expressions by combining like terms and applying the distributive property. Solve more complex equations and inequalities using substitution and elimination methods. Explore polynomials and how to factor them into simpler expressions. Delve into quadratic equations, understanding their roots, graphs, and applications in real-world scenarios."
     ],
     "Geometry Fundamentals": [
-        "Geometry involves shapes, sizes, and the properties of space. Basic concepts include points (dots on paper), lines (straight paths extending in both directions), angles (where two lines meet), and shapes like triangles, squares, and circles."
+        "Geometry involves shapes, sizes, and the properties of space. Basic concepts include points (dots on paper), lines (straight paths extending in both directions), angles (formed where two lines meet, measured in degrees), and shapes like triangles, squares, and circles. Understand the classification of angles (acute, right, obtuse) and the properties of parallel and perpendicular lines. Learn about different types of polygons and their properties. Explore the concepts of area, perimeter, and volume for 2D and 3D shapes. Study transformations, including reflection, rotation, translation, and scaling, and how they affect shapes in the coordinate plane."
     ],
     "Linear Equations": [
-        "Understand equations that form straight lines when graphed, solve problems like y=2x+3, and learn how to find the slope and intercepts of a line."
+        "Understand equations that form straight lines when graphed. Learn the slope-intercept form (y = mx + c) and how to interpret slope (m) and y-intercept (c). Solve problems involving real-world scenarios such as rate of change and predicting future values. Master methods to find the equation of a line given two points or one point and the slope. Explore the graphical solution of systems of linear equations and their interpretation as points of intersection."
     ],
     "Statistics": [
-        "Collect and organize data using tables and graphs, learn about mean, median, and mode, and interpret bar graphs, pie charts, and line graphs."
+        "Collect and organize data using tables, charts, and graphs. Learn about measures of central tendency (mean, median, mode) and measures of dispersion (range, variance, standard deviation). Understand how to construct and interpret bar graphs, pie charts, histograms, and line graphs. Explore the concept of correlation and how it is represented graphically. Delve into probability distributions and how statistics is used to make predictions and decisions in real-world scenarios."
     ],
     "Cell Structure": [
-        "Discover the basic unit of life, the cell, learn about its parts (nucleus, mitochondria, cell membrane), and compare plant and animal cells."
+        "Discover the basic unit of life, the cell, and its importance in living organisms. Learn about its parts, including the nucleus (control center), mitochondria (energy production), ribosomes (protein synthesis), and cell membrane (boundary and protection). Understand the differences between plant and animal cells, such as the presence of a cell wall and chloroplasts in plant cells. Explore specialized cells and their functions, like nerve cells, red blood cells, and muscle cells. Study cellular processes like photosynthesis, respiration, and osmosis."
     ],
     "Force and Motion": [
-        "Understand how forces make objects move, stop, or change direction, learn about Newton’s laws of motion, and explore speed, velocity, and acceleration."
+        "Understand how forces make objects move, stop, or change direction. Study the fundamental forces (gravitational, electromagnetic, frictional). Learn about Newton’s three laws of motion and their application in everyday life. Explore the concepts of speed, velocity, and acceleration, and how they are calculated. Understand circular motion, projectile motion, and the effects of forces in different environments like space or underwater. Delve into practical applications like designing safer vehicles or predicting the motion of objects in sports."
     ],
     "Chemical Reactions": [
-        "Study how substances combine or break apart to form new materials, learn about signs of a chemical reaction (bubbles, heat, color change), and explore simple reactions like burning or rusting."
+        "Study how substances combine or break apart to form new materials. Learn about the types of chemical reactions, including synthesis, decomposition, single displacement, and double displacement. Understand the signs of a chemical reaction (bubbles, heat, light, color change, precipitate formation). Explore exothermic and endothermic reactions and their energy changes. Learn how to write and balance chemical equations to represent reactions accurately. Study everyday examples, like cooking, combustion, and rusting, and their underlying chemistry."
     ],
     "Energy Forms": [
-        "Discover different types of energy (kinetic, potential, heat, light), learn how energy is transferred and transformed, and explore renewable and non-renewable energy sources."
+        "Discover the different types of energy: kinetic (motion), potential (stored), thermal (heat), electrical, light, and sound. Learn about the law of conservation of energy and how energy can neither be created nor destroyed, only transformed. Study energy transfer mechanisms, including conduction, convection, and radiation. Explore renewable energy sources like solar, wind, and hydroelectric, and compare them with non-renewable sources like coal, oil, and natural gas. Understand energy efficiency and its role in sustainable living."
     ],
     "Advanced Algebra": [
-        "Solve complex equations and inequalities, learn about polynomials and factoring, and explore quadratic equations and their graphs."
+        "Solve complex equations and inequalities involving multiple variables. Study polynomials in greater depth, including their division, roots, and graphs. Learn advanced factoring techniques like synthetic division and the quadratic formula. Explore systems of nonlinear equations and their solutions. Understand logarithmic and exponential functions and their applications in real-world problems like population growth and radioactive decay."
     ],
     "Trigonometry": [
-        "Study triangles and their angles, learn about sine, cosine, and tangent ratios, and apply trigonometry to solve real-world problems like finding heights or distances."
+        "Study triangles and their angles, focusing on the relationships between side lengths and angles in right triangles. Learn about sine, cosine, and tangent ratios and how to use them to solve problems. Explore the unit circle and trigonometric identities like Pythagorean identities and angle sum formulas. Apply trigonometry to solve real-world problems, such as finding heights of buildings or distances across rivers. Delve into graphing trigonometric functions and understanding their periodic nature."
     ],
     "Coordinate Geometry": [
-        "Plot points on a graph using coordinates (x, y), learn how to find the distance between two points and the midpoint of a line, and explore the equations of lines and circles."
+        "Plot points on a graph using coordinates (x, y). Learn how to find the distance between two points using the distance formula and locate the midpoint of a line segment. Explore equations of lines, including slope-intercept and point-slope forms. Understand the equations of circles, ellipses, and parabolas and their graphs. Study the intersections of lines and curves and their applications in optimization problems."
     ],
     "Probability": [
-        "Understand the chances of events happening, learn to calculate probabilities using fractions, decimals, and percentages, and explore independent and dependent events."
+        "Understand the chances of events happening. Learn to calculate probabilities using fractions, decimals, and percentages. Explore independent and dependent events and how they affect overall probability. Study the concept of expected value and its applications in decision-making and risk assessment. Learn about probability distributions and their role in predicting outcomes in statistics and science."
     ],
     "Atomic Structure": [
-        "Dive into the structure of atoms (protons, neutrons, electrons), learn about the periodic table and how elements are organized, and explore isotopes and atomic models."
+        "Dive into the structure of atoms, including protons, neutrons, and electrons. Learn about the arrangement of electrons in shells and subshells and how it determines chemical properties. Explore the periodic table and its organization based on atomic structure. Understand isotopes and their applications in medicine and archaeology. Study atomic models, from Dalton’s theory to quantum mechanical models."
     ],
     "Motion Laws": [
-        "Study Newton’s three laws of motion in detail, understand concepts like inertia, force, and momentum, and solve problems involving motion and forces."
+        "Study Newton’s three laws of motion in detail, focusing on concepts like inertia, force, acceleration, and momentum. Solve problems involving the application of these laws in everyday situations, like driving, sports, or engineering. Learn about friction and its effects on motion. Explore advanced topics like impulse, collision, and conservation of momentum."
     ],
     "Life Processes": [
-        "Learn how living organisms function (nutrition, respiration, excretion), explore the human body systems (digestive, respiratory, circulatory), and understand how plants and animals adapt to their environments."
+        "Learn how living organisms function. Study processes like nutrition, respiration, excretion, and reproduction. Explore the human body systems, including the digestive, respiratory, circulatory, and nervous systems. Understand how plants perform photosynthesis and transport water and nutrients. Delve into adaptations of organisms to their environments, from desert plants to deep-sea creatures."
     ],
     "Environmental Science": [
-        "Study ecosystems and the balance of nature, learn about natural resources and their conservation, and explore environmental issues like pollution, deforestation, and climate change."
+        "Study ecosystems and the interactions between organisms and their environments. Learn about natural resources, their uses, and methods of conservation. Explore environmental issues like pollution, deforestation, climate change, and their global impacts. Understand sustainable development and the importance of balancing human activities with environmental health. Study renewable energy technologies and waste management strategies."
     ],
     "Quadratic Equations": [
-        "Learn about quadratic equations, their solutions, and how to graph them. Understand the discriminant and its significance in determining the nature of roots."
+        "Learn about quadratic equations and their solutions using factoring, completing the square, and the quadratic formula. Explore their graphs and the significance of the vertex, axis of symmetry, and roots. Understand the discriminant and how it determines the nature of roots. Apply quadratic equations to real-world problems, like projectile motion and optimization."
     ],
     "Arithmetic Progressions": [
-        "Understand the concept of arithmetic progressions, find the nth term, and the sum of the first n terms. Solve real-world problems using arithmetic progressions."
+        "Understand the concept of arithmetic progressions (AP), where each term is obtained by adding a fixed number to the previous term. Learn to find the nth term and the sum of the first n terms. Solve real-world problems involving sequences, such as savings plans or seating arrangements in auditoriums."
     ],
     "Circles": [
-        "Explore the properties of circles, including chords, tangents, and angles subtended by chords. Learn about the theorems related to circles and their applications."
+        "Explore the properties of circles, including chords, tangents, and secants. Learn about theorems related to angles subtended by chords and arcs, and their applications. Study the properties of tangents and how they relate to radii and diameters. Solve problems involving inscribed and circumscribed polygons."
     ],
     "Chemical Reactions and Equations": [
-        "Understand the types of chemical reactions, balancing chemical equations, and the importance of chemical reactions in daily life."
+        "Understand the types of chemical reactions, including synthesis, decomposition, and displacement. Learn to balance chemical equations systematically. Study the importance of chemical reactions in everyday life, from cooking to industry."
     ],
-    "Acids, Bases and Salts": [
-        "Learn about the properties of acids, bases, and salts. Understand the pH scale, neutralization reactions, and the uses of acids, bases, and salts."
+    "Acids, Bases, and Salts": [
+        "Learn about the properties of acids, bases, and salts. Study the pH scale and its significance in determining acidity and alkalinity. Understand neutralization reactions and their applications in industries like agriculture and medicine. Explore the uses of common acids and bases in daily life."
     ],
     "Heredity and Evolution": [
-        "Study the principles of heredity and variation. Understand the concepts of evolution, natural selection, and the evidence for evolution."
+        "Study the principles of heredity and variation, focusing on Mendelian genetics. Understand the concept of DNA and its role in inheritance. Learn about natural selection and evolution, including evidence from fossils and comparative anatomy. Explore the significance of genetic mutations and their impact on evolution."
     ]
 }
+
 
 # HTML template with integrated login/registration
 HTML_TEMPLATE = '''
@@ -1585,39 +1586,63 @@ HTML_TEMPLATE = '''
 
         <!-- Learning Path Page -->
         <div id="learning-path-page" class="page">
-            <div class="breadcrumb" id="breadcrumb"></div>
-            <div id="class-selection" class="grid fade-in">
-                <!-- Classes will be dynamically inserted here -->
-            </div>
-            <div id="subject-selection" class="grid fade-in hidden">
-                <!-- Subjects will be dynamically inserted here -->
-            </div>
-            <div id="topic-selection" class="grid fade-in hidden">
-                <!-- Topics will be dynamically inserted here -->
-            </div>
-            <div id="content-section" class="hidden">
-                <div class="card">
-                    <h2 id="content-title"></h2>
-                    <div id="content-display" class="content-display"></div>
-                    <button id="mark-complete-button" class="button" onclick="markComplete()" disabled>Mark as Complete</button>
-                </div>
-            </div>
-            <div id="video-section" class="hidden">
-                <div class="card">
-                    <h2>Video: <span id="video-title"></span></h2>
-                    <video id="video-player" controls width="100%">
-                        Your browser does not support the video tag.
-                    </video>
-                    <div class="learning-path-nav">
-                        <button class="button" onclick="previousTopic()">Previous</button>
-                        <button class="button" onclick="nextTopic()" id="next-button" disabled>Next</button>
+            <!-- Grade Selection View -->
+            <div id="grade-view" class="grid fade-in">
+                <div class="hero">
+                    <h1>Select Your Grade</h1>
+                    <div id="class-selection" class="grid">
+                        <!-- Classes will be dynamically inserted here -->
                     </div>
                 </div>
             </div>
-            <div id="navigation" class="hidden">
-                <button class="back-button" onclick="goBack()">
-                    <i class="fas fa-arrow-left"></i> Go Back
-                </button>
+            <!-- Subject View -->
+            <div id="subject-view" class="hidden">
+                <div class="hero">
+                    <h1>Grade <span id="selected-grade"></span></h1>
+                    <div class="grid">
+                        <div id="subject-concept-grid" class="grid"></div>
+                    </div>
+                    <button class="button" onclick="backToGrades()">
+                        <i class="fas fa-arrow-left"></i> Back to Grades
+                    </button>
+                </div>
+            </div>
+                    <!-- Concept Content View -->
+            <!-- Concept Content View -->
+            <div id="concept-view" class="hidden">
+                <div class="breadcrumb" id="breadcrumb"></div>
+                <div class="card">
+                    <!-- Topic Title -->
+                    <h2 id="content-title"></h2>
+
+                    <!-- Explanation Content (Text) -->
+                    <div id="content-display" class="content-display"></div>
+                    <button id="mark-complete" class="button" onclick="markAsComplete()">
+                        <i class="fas fa-check"></i> Mark as Complete
+                    </button>
+
+                    <!-- Video Section -->
+                    <div id="video-section">
+                        <video id="video-player" controls width="100%">
+                            Your browser does not support the video tag.
+                        </video>
+                    </div>
+
+                    <!-- Navigation Buttons -->
+                    <div class="navigation-buttons">
+                        <button class="button" onclick="previousConcept()">
+                            <i class="fas fa-arrow-left"></i> Previous
+                        </button>
+                        <button class="button" onclick="nextConcept()">
+                            Next <i class="fas fa-arrow-right"></i>
+                        </button>
+                    </div>
+
+                    <!-- Back to Subjects Button -->
+                    <button class="button mt-4" onclick="backToSubjects()">
+                        <i class="fas fa-arrow-left"></i> Back to Subjects
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -1826,7 +1851,8 @@ HTML_TEMPLATE = '''
         let currentClass = null;
         let currentSubject = null;
         let currentTopic = null;
-        let contentIndex = 0;
+        let currentTopicIndex = 0; // Track the current topic index
+        let topicsList = [];
         let contentComplete = false;
         let videoComplete = false;
         let isMobileMenuOpen = false;
@@ -2004,151 +2030,189 @@ HTML_TEMPLATE = '''
             const msg = Message(subject, recipients=[to], body=body);
             mail.send(msg);
         }
+        function showPage(pageId) {
+            document.querySelectorAll('.page').forEach(page => {
+                page.classList.remove('active');
+            });
+            const targetPage = document.getElementById(`${pageId}-page`);
+            if (targetPage) {
+                targetPage.classList.add('active');
+            }
+            if (pageId === 'learning-path') {
+                initLearningPath();
+            }
+        }
 
         // Initialize the learning path
-        function initLearningPath() {
-            renderClasses();
-            updateBreadcrumb();
-        }
-
-        // Render class selection
-        function renderClasses() {
+       function initLearningPath() {
             fetch('/api/classes')
                 .then(response => response.json())
-                .then(data => {
-                    const container = document.getElementById('class-selection');
-                    container.innerHTML = Object.keys(data.classes).map(className => `
-                        <div class="card ${currentUser && currentUser.class !== className ? 'blurred' : ''}" onclick="selectClass('${className}')">
-                            <h2 class="card-title">Class ${className}</h2>
-                            <p class="card-content">Explore subjects and topics for Class ${className}</p>
-                        </div>
-                    `).join('');
-                });
+                .then(data => renderClasses(data))
+                .catch(error => console.error('Error:', error));
         }
 
-        // Select a class
+        function renderClasses(data) {
+            const container = document.getElementById('class-selection');
+            if (!container) return;
+            container.innerHTML = Object.keys(data.classes).map(className => `
+                <div class="card" onclick="selectClass('${className}')">
+                    <h2>Class ${className}</h2>
+                    <p>Start your ${className} grade journey</p>
+                </div>
+            `).join('');
+        }
+
         function selectClass(className) {
-            if (currentUser && currentUser.class !== className) {
-                alert('You can only access your registered class.');
-                return;
-            }
             currentClass = className;
             fetch(`/api/subjects/${className}`)
                 .then(response => response.json())
                 .then(data => {
-                    const container = document.getElementById('subject-selection');
+                    const container = document.getElementById('subject-concept-grid');
                     container.innerHTML = Object.keys(data.subjects).map(subject => `
-                        <div class="card" onclick="selectSubject('${subject}')">
-                            <h2 class="card-title">${subject}</h2>
-                            <p class="card-content">Explore topics in ${subject}</p>
+                        <div class="card">
+                            <h2>${subject}</h2>
+                            <div class="topic-list">
+                                ${data.subjects[subject].topics.map(topic => `
+                                    <div class="topic-item" onclick="showConcept('${subject}', '${topic}')">
+                                        ${topic}
+                                    </div>
+                                `).join('')}
+                            </div>
                         </div>
                     `).join('');
-                    
-                    showSection('subject-selection');
+                    document.getElementById('selected-grade').textContent = className;
+                    document.getElementById('grade-view').classList.add('hidden');
+                    document.getElementById('subject-view').classList.remove('hidden');
                     updateBreadcrumb();
-                });
+
+                    // Store the list of topics for the selected subject
+                    topicsList = data.subjects[Object.keys(data.subjects)[0]].topics; // Default to the first subject's topics
+                })
+                .catch(error => console.error('Error:', error));
         }
 
-        // Select a subject
-        function selectSubject(subject) {
-            if (!currentUser) {
-                showPage('login');
-                return;
+        // Function to show the previous concept
+        function previousConcept() {
+            if (currentTopicIndex > 0) {
+                currentTopicIndex--;
+                const previousTopic = topicsList[currentTopicIndex];
+                showConcept(currentSubject, previousTopic);
+            } else {
+                alert("You are already on the first concept.");
             }
-            currentSubject = subject;
-            fetch(`/api/topics/${currentClass}/${subject}`)
-                .then(response => response.json())
-                .then(data => {
-                    const container = document.getElementById('topic-selection');
-                    container.innerHTML = data.topics.map(topic => `
-                        <div class="card" onclick="selectTopic('${topic}')">
-                            <h2 class="card-title">${topic}</h2>
-                            <p class="card-content">Learn about ${topic}</p>
-                        </div>
-                    `).join('');
-                    
-                    showSection('topic-selection');
-                    updateBreadcrumb();
-                });
         }
 
-        // Select a topic
-        function selectTopic(topic) {
+        // Function to show the next concept
+        function nextConcept() {
+            if (currentTopicIndex < topicsList.length - 1) {
+                currentTopicIndex++;
+                const nextTopic = topicsList[currentTopicIndex];
+                showConcept(currentSubject, nextTopic);
+            } else {
+                alert("You have reached the last concept.");
+            }
+        }
+
+        function showConcept(subject, topic) {
+            currentSubject = subject;
             currentTopic = topic;
-            fetch(`/api/content/${topic}`)
+            currentTopicIndex = topicsList.indexOf(topic);
+
+            // Fetch the content for the selected topic
+            fetch(`/api/content/${encodeURIComponent(topic)}`)
                 .then(response => response.json())
                 .then(data => {
-                    if (data.content) {
-                        document.getElementById('topic-selection').classList.add('hidden');
-                        document.getElementById('content-section').classList.remove('hidden');
-                        displayContentWordByWord(data.content);
-                    } else {
-                        alert('No content available for this topic.');
+                    // Update the content title
+                    document.getElementById('content-title').textContent = topic;
+
+                    // Display the content with typing animation
+                    const contentDisplay = document.getElementById('content-display');
+                    typeContent(contentDisplay, data.content);
+
+                    // Show the concept view and hide the subject view
+                    document.getElementById('subject-view').classList.add('hidden');
+                    document.getElementById('concept-view').classList.remove('hidden');
+
+                    // Update the breadcrumb
+                    updateBreadcrumb();
+
+                    // Load the video (if available)
+                    const videoPlayer = document.getElementById('video-player');
+                    const videoPath = `/videos/${encodeURIComponent(topic)}.mp4`;
+                    videoPlayer.src = videoPath;
+                    videoPlayer.load();
+
+                    // Disable/enable navigation buttons
+                    const previousButton = document.querySelector('.navigation-buttons button:first-child');
+                    const nextButton = document.querySelector('.navigation-buttons button:last-child');
+
+                    previousButton.disabled = currentTopicIndex === 0;
+                    nextButton.disabled = currentTopicIndex === topicsList.length - 1;
+
+                    // Initialize progress tracking
+                    if (currentUser) {
+                        if (!currentUser.progress[currentClass]) {
+                            currentUser.progress[currentClass] = {};
+                        }
+                        if (!currentUser.progress[currentClass][currentSubject]) {
+                            currentUser.progress[currentClass][currentSubject] = { completed: 0, total: topicsList.length };
+                        }
                     }
-                });
+                })
+                .catch(error => console.error('Error:', error));
+        }
+
+
+        function backToGrades() {
+            document.getElementById('subject-view').classList.add('hidden');
+            document.getElementById('grade-view').classList.remove('hidden');
+            currentClass = null;
+            currentSubject = null;
             updateBreadcrumb();
         }
 
-        // Display content word by word
-        function displayContentWordByWord(content) {
-            const contentContainer = document.getElementById('content-display');
-            contentContainer.innerHTML = ''; // Clear previous content
-            const words = content.split(' ');
+        function backToSubjects() {
+            document.getElementById('concept-view').classList.add('hidden');
+            document.getElementById('subject-view').classList.remove('hidden');
+            currentTopic = null;
+            updateBreadcrumb();
+        }
+
+        function updateBreadcrumb() {
+            const breadcrumb = document.getElementById('breadcrumb');
+            if (currentClass && currentSubject && currentTopic) {
+                breadcrumb.innerHTML = `
+                    <span onclick="backToGrades()">Grade ${currentClass}</span> > 
+                    <span onclick="backToSubjects()">${currentSubject}</span> > 
+                    <span>${currentTopic}</span>
+                `;
+            } else if (currentClass && currentSubject) {
+                breadcrumb.innerHTML = `
+                    <span onclick="backToGrades()">Grade ${currentClass}</span> > 
+                    <span>${currentSubject}</span>
+                `;
+            } else if (currentClass) {
+                breadcrumb.innerHTML = `<span>Grade ${currentClass}</span>`;
+            }
+        }
+
+        function typeContent(element, text, speed = 50) {
             let index = 0;
+            element.innerHTML = ""; // Clear the content
+            const cursor = document.createElement('span');
+            cursor.className = 'typing-cursor';
+            element.appendChild(cursor);
 
             const interval = setInterval(() => {
-                if (index >= words.length) {
+                if (index < text.length) {
+                    element.insertBefore(document.createTextNode(text[index]), cursor);
+                    index++;
+                } else {
                     clearInterval(interval);
-                    document.getElementById('mark-complete-button').disabled = false; // Enable "Mark as Complete" button
-                    return;
+                    cursor.remove(); // Remove the cursor after typing is complete
                 }
-                contentContainer.innerHTML += words[index] + ' ';
-                index++;
-            }, 100); // Adjust speed as needed
+            }, speed);
         }
-
-        // Mark a topic as complete
-        function markComplete() {
-            contentComplete = true;
-            document.getElementById('content-section').classList.add('hidden');
-            document.getElementById('video-section').classList.remove('hidden');
-            fetch(`/api/video/${currentTopic}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.video_path) {
-                        const videoPlayer = document.getElementById('video-player');
-                        videoPlayer.src = `/videos/${data.video_path}`;
-                        videoPlayer.load();
-                        videoPlayer.play();
-                        document.getElementById('next-button').disabled = false; // Enable "Next" button
-                    } else {
-                        alert('No video available for this topic.');
-                    }
-                });
-        }
-
-        // Navigate to the next topic
-        function nextTopic() {
-            const topics = education_data['classes'][currentClass]['subjects'][currentSubject]['topics'];
-            const currentIndex = topics.indexOf(currentTopic);
-            if (currentIndex < topics.length - 1) {
-                selectTopic(topics[currentIndex + 1]);
-            } else {
-                alert('No more topics in this subject.');
-            }
-        }
-
-        // Navigate to the previous topic
-        function previousTopic() {
-            const topics = education_data['classes'][currentClass]['subjects'][currentSubject]['topics'];
-            const currentIndex = topics.indexOf(currentTopic);
-            if (currentIndex > 0) {
-                selectTopic(topics[currentIndex - 1]);
-            } else {
-                alert('This is the first topic.');
-            }
-        }
-
         // Show page function
         function showPage(pageId) {
             // If trying to access learning path while not logged in
@@ -2186,25 +2250,6 @@ HTML_TEMPLATE = '''
                 document.getElementById('navigation').classList.add('hidden');
             }
             updateBreadcrumb();
-        }
-
-        // Update breadcrumb
-        function updateBreadcrumb() {
-            const breadcrumb = document.getElementById('breadcrumb');
-            let path = [];
-            if (currentClass) path.push(`Class ${currentClass}`);
-            if (currentSubject) path.push(currentSubject);
-            if (currentTopic) path.push(currentTopic);
-            breadcrumb.textContent = path.join(' → ');
-        }
-
-        // Show/hide sections
-        function showSection(sectionId) {
-            ['class-selection', 'subject-selection', 'topic-selection', 'content-section', 'video-section'].forEach(id => {
-                document.getElementById(id).classList.add('hidden');
-            });
-            document.getElementById(sectionId).classList.remove('hidden');
-            document.getElementById('navigation').classList.remove('hidden');
         }
 
         // Initialize auth state and mobile menu
@@ -2250,8 +2295,8 @@ HTML_TEMPLATE = '''
             const satisfactionRate = document.getElementById('satisfaction-rate');
 
             const stats = [
-                { element: topicsCovered, target: 100, duration: 2000 },
-                { element: studentsBenefited, target: 5000, duration: 2000 },
+                { element: topicsCovered, target: 25, duration: 2000 },
+                { element: studentsBenefited, target: 5, duration: 2000 },
                 { element: satisfactionRate, target: 95, duration: 2000 }
             ];
 
