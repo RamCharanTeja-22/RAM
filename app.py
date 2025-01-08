@@ -970,6 +970,280 @@ HTML_TEMPLATE = '''
         .learning-path-nav .button {
             width: 48%;
         }
+        /* Features Page Styles */
+      /* Features Page Styles */
+        #features-page {
+            padding: 2rem;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8f0 100%);
+            min-height: 100vh;
+        }
+
+        .hero {
+            text-align: center;
+            margin-bottom: 3rem;
+            position: relative;
+        }
+
+        .hero h1 {
+            font-size: 3rem;
+            color: #2d3748;
+            margin-bottom: 2rem;
+            font-weight: 700;
+            position: relative;
+            display: inline-block;
+        }
+
+        .hero h1::after {
+            content: '';
+            position: absolute;
+            bottom: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0;
+            height: 3px;
+            background: #4a90e2;
+            animation: underline 1s ease forwards 0.5s;
+        }
+
+        @keyframes underline {
+            to {
+                width: 100%;
+            }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .feature-card {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            cursor: pointer;
+        }
+
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(90deg, #4a90e2, #63b3ed);
+            transform: scaleX(0);
+            transform-origin: left;
+            transition: transform 0.3s ease;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .feature-card:hover::before {
+            transform: scaleX(1);
+        }
+
+        .feature-icon {
+            font-size: 2.5rem;
+            color: #4a90e2;
+            margin-bottom: 1.5rem;
+            text-align: center;
+            transition: transform 0.3s ease;
+        }
+
+        .feature-card:hover .feature-icon {
+            transform: scale(1.1) rotate(5deg);
+        }
+
+        .feature-card h2 {
+            font-size: 1.5rem;
+            color: #2d3748;
+            margin-bottom: 1rem;
+            font-weight: 600;
+            transition: color 0.3s ease;
+        }
+
+        .feature-card:hover h2 {
+            color: #4a90e2;
+        }
+
+        .feature-card p {
+            color: #4a5568;
+            line-height: 1.6;
+            margin-bottom: 1rem;
+        }
+
+        .feature-explanation {
+            padding-top: 1rem;
+            border-top: 1px solid #e2e8f0;
+            margin-top: 1rem;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s ease;
+            max-height: 0;
+            overflow: hidden;
+        }
+
+        .feature-card:hover .feature-explanation {
+            opacity: 1;
+            transform: translateY(0);
+            max-height: 200px;
+        }
+
+        .feature-explanation p {
+            font-size: 0.95rem;
+            color: #718096;
+        }
+
+        /* Animation Classes */
+        .slide-in-left {
+            opacity: 0;
+            animation: slideInLeft 0.6s ease-out forwards;
+        }
+
+        .slide-in-right {
+            opacity: 0;
+            animation: slideInRight 0.6s ease-out forwards;
+        }
+
+        @keyframes slideInLeft {
+            from {
+                opacity: 0;
+                transform: translateX(-50px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        @keyframes slideInRight {
+            from {
+                opacity: 0;
+                transform: translateX(50px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        /* Stagger animation delay for cards */
+        .feature-card:nth-child(1) { animation-delay: 0.1s; }
+        .feature-card:nth-child(2) { animation-delay: 0.2s; }
+        .feature-card:nth-child(3) { animation-delay: 0.3s; }
+        .feature-card:nth-child(4) { animation-delay: 0.4s; }
+        .feature-card:nth-child(5) { animation-delay: 0.5s; }
+        .feature-card:nth-child(6) { animation-delay: 0.6s; }
+        .feature-card:nth-child(7) { animation-delay: 0.7s; }
+        .feature-card:nth-child(8) { animation-delay: 0.8s; }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            #features-page {
+                padding: 1rem;
+            }
+            
+            .hero h1 {
+                font-size: 2.5rem;
+            }
+            
+            .grid {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+            }
+            
+            .feature-card {
+                padding: 1.5rem;
+            }
+        }
+
+        /* Ensure Font Awesome icons are styled properly */
+        .fas {
+            display: inline-block;
+            width: 1em;
+            height: 1em;
+            vertical-align: -0.125em;
+        }
+        /* ... (keeping previous base styles) ... */
+
+/* Add these new styles to your existing CSS */
+
+/* Modify the existing p styles for first paragraph */
+        .feature-card p:first-of-type {
+            color: #4a5568;
+            line-height: 1.6;
+            margin-bottom: 1rem;
+            opacity: 0;
+            transform: translateY(-20px);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            position: relative;
+            z-index: 2;
+        }
+
+        .feature-card:hover p:first-of-type {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* Replace your existing feature-explanation styles with these */
+        .feature-explanation {
+            padding-top: 1rem;
+            border-top: 1px solid #e2e8f0;
+            margin-top: 1rem;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.5s ease;
+            max-height: 0;
+            overflow: hidden;
+            /* Add delay for second stage */
+            transition-delay: 0.3s;
+        }
+
+        .feature-card:hover .feature-explanation {
+            opacity: 1;
+            transform: translateY(0);
+            max-height: 200px;
+        }
+
+        /* Add this new indicator style */
+        .feature-card::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0;
+            height: 2px;
+            background: #4a90e2;
+            transition: width 0.3s ease;
+        }
+
+        .feature-card:hover::after {
+            width: 90%;
+        }
+
+        /* Add loading indicator animation */
+        @keyframes pulse {
+            0% { opacity: 0.6; }
+            50% { opacity: 1; }
+            100% { opacity: 0.6; }
+        }
+
+        .feature-card:hover::before {
+            animation: pulse 2s infinite;
+        }
+        /* Update the features page background */
+        
     </style>
 </head>
 <body>
@@ -1044,28 +1318,28 @@ HTML_TEMPLATE = '''
                 <h2>What Our Users Say</h2>
                 <div class="testimonials-scroll">
                     <div class="testimonial-card">
-                        <img src="https://via.placeholder.com/80" alt="User 1">
-                        <h3>John Doe</h3>
+                        <img src="https://i.ibb.co/PjZVfr3/Screenshot-2025-01-08-052901.png"  alt="User 1">
+                        <h3>Karthik</h3>
                         <p>"TutorTeach.ai has completely transformed the way I learn. The personalized lessons are amazing!"</p>
                     </div>
                     <div class="testimonial-card">
-                        <img src="https://via.placeholder.com/80" alt="User 2">
-                        <h3>Jane Smith</h3>
+                        <img src="https://i.ibb.co/RHpQ4tK/vkr.jpg" alt="User 2">
+                        <h3>Vinodh Kumar</h3>
                         <p>"The AI-generated videos are so engaging. I’ve never enjoyed learning this much before!"</p>
                     </div>
                     <div class="testimonial-card">
-                        <img src="https://via.placeholder.com/80" alt="User 3">
-                        <h3>Alice Johnson</h3>
+                        <img src="https://i.ibb.co/MBLrSTQ/karna.jpg" " alt="User 3">
+                        <h3>Karuna Karan</h3>
                         <p>"The progress tracking feature helps me stay motivated and focused on my goals."</p>
                     </div>
                     <div class="testimonial-card">
-                        <img src="https://via.placeholder.com/80" alt="User 4">
-                        <h3>Bob Brown</h3>
+                        <img src="https://i.ibb.co/Jcxy1JW/vijay.jpg" alt="User 4">
+                        <h3>Vijay</h3>
                         <p>"The AI-driven content is tailored perfectly to my learning style. Highly recommended!"</p>
                     </div>
                     <div class="testimonial-card">
-                        <img src="https://via.placeholder.com/80" alt="User 5">
-                        <h3>Charlie Davis</h3>
+                        <img src="https://i.ibb.co/hd1bNRn/nikhil.jpg" alt="User 5">
+                        <h3>Nikhil</h3>
                         <p>"The interactive lessons and real-time feedback have made learning so much more effective."</p>
                     </div>
                 </div>
