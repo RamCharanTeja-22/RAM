@@ -6,3 +6,4 @@ numpy==1.23.5
 scikit-learn==1.2.2
 openpyxl==3.1.2
 plotly==5.10.0
+XlsxWriter==3.2.0
