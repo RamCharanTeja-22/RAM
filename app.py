@@ -1,1151 +1,1341 @@
-import pandas as pd
-import numpy as np
-from flask import Flask, render_template_string, request, jsonify, send_file
-from io import BytesIO
+from flask import Flask, request, jsonify, render_template_string, redirect, url_for, flash, session,send_file
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from flask_mail import Mail, Message
+from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
+from datetime import datetime, timedelta
 import os
-import plotly.graph_objects as go
-import plotly.express as px
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score
-from sklearn.preprocessing import StandardScaler
+import jwt
+from werkzeug.utils import secure_filename
+import os
+import uuid
 
 app = Flask(__name__)
+app.config.update(
+    SECRET_KEY='your-secret-key-here',
+    SQLALCHEMY_DATABASE_URI='sqlite:///edutrade.db',
+    UPLOAD_FOLDER='static/uploads',
+    MAX_CONTENT_LENGTH=16 * 1024 * 1024,  # 16MB max file size
+    MAIL_SERVER='smtp.gmail.com',
+    MAIL_PORT=587,
+    MAIL_USE_TLS=True,
+    MAIL_USERNAME='ramcharancai22@gmail.com',  # Update with your email
+    MAIL_PASSWORD='zolt ahoa jxin isio'      # Update with your app password
+)
 
-class PerformanceAnalyzer:
-    def _init_(self):
-        self.initial_data = None
-        self.improvement_data = None
-        self.model = None
-        
-    def load_initial_data(self, file):
-        if file.filename.endswith('.csv'):
-            self.initial_data = pd.read_csv(file)
-        elif file.filename.endswith('.xlsx'):
-            self.initial_data = pd.read_excel(file)
-        else:
-            raise ValueError("Invalid file type")
+db = SQLAlchemy(app)
+mail = Mail(app)
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
+
+# Models
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(128))
+    full_name = db.Column(db.String(100))
+    department = db.Column(db.String(100))
+    year = db.Column(db.Integer)
+    profile_picture = db.Column(db.String(200))
+    is_verified = db.Column(db.Boolean, default=False)
+    verification_token = db.Column(db.String(100))
+    reset_token = db.Column(db.String(100))
+    reset_token_expiry = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    listings = db.relationship('Listing', backref='seller', lazy=True)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+class Listing(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    price = db.Column(db.Float, nullable=False)
+    rent_price = db.Column(db.Float)
+    category = db.Column(db.String(50), nullable=False)
+    condition = db.Column(db.String(50), nullable=False)
+    image_url = db.Column(db.String(200), nullable=False)
+    is_for_rent = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    seller_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     
-    def load_improvement_data(self, file):
-        if file.filename.endswith('.csv'):
-            self.improvement_data = pd.read_csv(file)
-        elif file.filename.endswith('.xlsx'):
-            self.improvement_data = pd.read_excel(file)
-        else:
-            raise ValueError("Invalid file type")
-    
-    def analyze_performance(self):
-        if self.initial_data is None:
-            return None
-        
-        # Feature Engineering: Convert categorical data (e.g., Course Name) to numerical values
-        self.initial_data['Course Code'] = self.initial_data['Course Name'].factorize()[0]
-        
-        # Prepare data for machine learning
-        X = self.initial_data[['Marks', 'Course Code']]
-        y = self.initial_data['Marks'].apply(lambda x: 1 if x >= 75 else (0 if x >= 60 else -1))  # 1 = Strong, 0 = Average, -1 = Weak
-        
-        # Split into train and test sets
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
-        
-        # Train a Random Forest Classifier
-        self.model = RandomForestClassifier(n_estimators=100, random_state=42)
-        self.model.fit(X_train, y_train)
-        
-        # Test the model
-        y_pred = self.model.predict(X_test)
-        accuracy = accuracy_score(y_test, y_pred)
-        
-        # Categorize students based on predictions
-        student_performance = self.initial_data.copy()
-        student_performance['Predicted Category'] = self.model.predict(X[['Marks', 'Course Code']])
-        student_performance['Category'] = student_performance['Predicted Category'].apply(
-            lambda x: 'Strong' if x == 1 else ('Average' if x == 0 else 'Weak')
-        )
-        
-        return student_performance, accuracy
-    
-    def recommend_courses(self):
-        if self.initial_data is None:
-            return None
-        
-        # We can use a simple rule-based approach or use collaborative filtering
-        weak_students = self.initial_data[self.initial_data['Marks'] < 60]
-        
-        if weak_students.empty:
-            return None  # If no weak students, return None
-        
-        # Sample course recommendation based on current performance
-        recommended_courses = {
-            'Python Basics': ['Data Structures', 'Algorithm Basics'],
-            'SQL Essentials': ['Database Design', 'Advanced SQL'],
-            'Java Fundamentals': ['Object Oriented Programming', 'Java Advanced'],
-            'C Programming': ['Data Structures in C', 'System Programming']
-        }
-        
-        recommendations = []
-        for _, student in weak_students.iterrows():
-            current_courses = set(student['Course Name'].split(', '))  # Ensure proper handling of course names
-            todo_courses = []
-            for course in current_courses:
-                if course in recommended_courses:
-                    todo_courses.extend(recommended_courses[course])
-            
-            recommendations.append({
-                'Student Name': student['Candidate Name'],
-                'Email': student['Candidate Email'],
-                'Current Average': f"{student['Marks']:.2f}",
-                'Recommended Courses': ', '.join(todo_courses)  # Join list of recommended courses as string
-            })
-        
-        return recommendations
-    
-    def pair_students(self):
-        student_performance, _ = self.analyze_performance()
-        if student_performance is None:
-            return None
-        
-        weak_students = student_performance[student_performance['Category'] == 'Weak']
-        strong_students = student_performance[student_performance['Category'] == 'Strong']
-        
-        # Randomly pair weak students with strong ones
-        pairs = []
-        for _, weak in weak_students.iterrows():
-            if not strong_students.empty:
-                strong = strong_students.iloc[np.random.randint(len(strong_students))]
-                pairs.append({
-                    'Weak Student': weak['Candidate Name'],
-                    'Weak Student Email': weak['Candidate Email'],
-                    'Weak Student Average': f"{weak['Marks']:.2f}",
-                    'Strong Student': strong['Candidate Name'],
-                    'Strong Student Email': strong['Candidate Email'],
-                    'Strong Student Average': f"{strong['Marks']:.2f}"
-                })
-                
-        return pairs
-    
-    
-    def analyze_improvement_data(self):
-        if self.initial_data is None:
-            return None
-            
-        from sklearn.ensemble import RandomForestRegressor
-        from sklearn.preprocessing import StandardScaler
-        
-        # Generate base improvement data
-        improvement_data = []
-        courses = ['Python Basics', 'Java Fundamentals', 'SQL Essentials', 'Data Structures', 
-                'Web Development', 'Algorithm Basics', 'Database Design', 'C Programming']
-        
-        # Create training data for the ML model
-        X_train = []
-        y_train = []
-        
-        # Generate training data with patterns
-        for _ in range(1000):
-            initial_mark = np.random.uniform(40, 95)
-            attempts = np.random.randint(1, 5)
-            study_hours = np.random.uniform(1, 10)
-            attendance = np.random.uniform(0.6, 1.0)
-            
-            # Create pattern: Higher study hours and attendance generally lead to better improvement
-            improvement = (study_hours * 0.5 + attendance * 10) * (100 - initial_mark) / 100
-            improvement *= np.random.uniform(0.8, 1.2)  # Add some randomness
-            
-            X_train.append([initial_mark, attempts, study_hours, attendance])
-            y_train.append(min(improvement, 100 - initial_mark))  # Cap improvement
-        
-        # Train ML model
-        X_train = np.array(X_train)
-        y_train = np.array(y_train)
-        
-        scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        
-        model = RandomForestRegressor(n_estimators=100, random_state=42)
-        model.fit(X_train_scaled, y_train)
-        
-        # Generate actual student data using the ML model
-        for i in range(500):
-            student_name = f'Student_{i+1}'
-            student_email = f'student{i+1}@example.com'
-            course = np.random.choice(courses)
-            
-            # Initial student characteristics
-            initial_marks = np.random.uniform(40, 85)
-            num_attempts = np.random.randint(2, 5)
-            base_study_hours = np.random.uniform(2, 8)
-            base_attendance = np.random.uniform(0.7, 0.95)
-            
-            previous_marks = initial_marks
-            
-            # Generate improvement trajectory for each attempt
-            for attempt in range(num_attempts):
-                attempt_id = f'ATT-{attempt+1}'
-                
-                if attempt == 0:
-                    marks = initial_marks
-                    improvement = 0
-                else:
-                    # Student characteristics might improve with each attempt
-                    study_hours = base_study_hours * (1 + attempt * 0.1)  # Study hours increase with attempts
-                    attendance = min(1.0, base_attendance * (1 + attempt * 0.05))  # Attendance improves
-                    
-                    # Predict improvement using ML model
-                    features = np.array([[previous_marks, attempt + 1, study_hours, attendance]])
-                    features_scaled = scaler.transform(features)
-                    predicted_improvement = model.predict(features_scaled)[0]
-                    
-                    # Add some noise to the prediction
-                    noise = np.random.normal(0, 2)
-                    actual_improvement = max(0, min(predicted_improvement + noise, 100 - previous_marks))
-                    
-                    # Calculate new marks
-                    marks = previous_marks + actual_improvement
-                    improvement = marks - previous_marks
-                    
-                    # Occasionally simulate setbacks (20% chance)
-                    if np.random.random() < 0.2:
-                        marks = max(previous_marks - np.random.uniform(0, 5), 40)
-                        improvement = marks - previous_marks
-                
-                # Record the data point
-                improvement_data.append({
-                    'Candidate Name': student_name,
-                    'Candidate Email': student_email,
-                    'Course Name': course,
-                    'Initial Marks': round(initial_marks if attempt == 0 else previous_marks, 2),
-                    'Improved Marks': round(marks, 2),
-                    'Improvement': round(improvement, 2),
-                    'Attempt ID': attempt_id,
-                    'Study Hours': round(base_study_hours * (1 + attempt * 0.1), 2),
-                    'Attendance Rate': round(min(1.0, base_attendance * (1 + attempt * 0.05)), 2)
-                })
-                
-                previous_marks = marks
-        
-        return pd.DataFrame(improvement_data)
-        
-    def analyze_improvement(self):
-        if self.initial_data is None or self.improvement_data is None:
-            return None
-        
-        # Combine initial and improvement data
-        all_data = pd.concat([self.initial_data, self.improvement_data])
-        
-        improvements = []
-        for name, group in all_data.groupby('Candidate Email'):
-            if len(group) > 1:  # If student has multiple attempts
-                first_attempts = group[group['Attempt ID'] == 'ATT-1']
-                last_attempts = group[group['Attempt ID'].str.contains('ATT-2')]
-                
-                if not first_attempts.empty and not last_attempts.empty:
-                    initial_data_dict = first_attempts.set_index('Course Name')['Marks'].to_dict()
-                    final_data_dict = last_attempts.set_index('Course Name')['Marks'].to_dict()
-                    
-                    # Compare course by course
-                    for course_name, initial_marks in initial_data_dict.items():
-                        if course_name in final_data_dict:
-                            final_marks = final_data_dict[course_name]
-                            if final_marks > initial_marks:
-                                improvements.append({
-                                    'Student Name': group['Candidate Name'].iloc[0],
-                                    'Email': name,
-                                    'Course Name': course_name,
-                                    'Initial Marks': f"{initial_marks:.2f}",
-                                    'Improved Marks': f"{final_marks:.2f}",
-                                    'Improvement': f"{final_marks - initial_marks:.2f}"
-                                })
-        
-        return improvements
-    def generate_performance_distribution_chart_with_names(self):
-        if self.initial_data is None:
-            return None
-
-        self.initial_data['Performance Category'] = self.initial_data['Marks'].apply(
-            lambda x: 'Strong' if x >= 75 else ('Average' if x >= 60 else 'Weak')
-        )
-        category_counts = self.initial_data.groupby('Performance Category')['Candidate Name'].apply(
-            lambda names: ', '.join(names)
-        )
-        
-        fig = go.Figure(
-            data=[go.Bar(
-                x=category_counts.index,
-                y=category_counts.str.split(', ').str.len(),
-                text=category_counts,
-                hoverinfo='x+y+text',
-                marker=dict(color=['#4caf50', '#ffa000', '#f44336'])
-            )]
-        )
-        fig.update_layout(
-            title="Performance Distribution",
-            xaxis_title="Performance Category",
-            yaxis_title="Number of Students",
-            template="plotly_white"
-        )
-        return fig.to_html(full_html=False)
-
-    
-    def generate_performance_distribution_chart(self):
-            if self.initial_data is None:
-                return None
-            
-            # Create performance distribution
-            self.initial_data['Performance Category'] = self.initial_data['Marks'].apply(
-                lambda x: 'Strong' if x >= 75 else ('Average' if x >= 60 else 'Weak')
-            )
-            category_counts = self.initial_data['Performance Category'].value_counts()
-
-            # Create a bar chart with Plotly
-            fig = go.Figure(
-                data=[go.Bar(x=category_counts.index, y=category_counts.values, 
-                            marker=dict(color=['#4caf50', '#ffa000', '#f44336']))]
-            )
-            fig.update_layout(
-                title="Performance Distribution",
-                xaxis_title="Performance Category",
-                yaxis_title="Number of Students",
-                template="plotly_white"
-            )
-            return fig.to_html(full_html=False)
-
-    def generate_course_performance_chart(self):
-        if self.initial_data is None:
-            return None
-
-        # Average marks by course
-        course_performance = self.initial_data.groupby('Course Name')['Marks'].mean().sort_values()
-
-        # Create a horizontal bar chart with Plotly
-        fig = px.bar(
-            course_performance,
-            x=course_performance.values,
-            y=course_performance.index,
-            orientation='h',
-            labels={"x": "Average Marks", "y": "Course Name"},
-            title="Average Performance by Course",
-            template="plotly_white"
-        )
-        return fig.to_html(full_html=False)
-    def generate_course_performance_chart_with_names(self):
-        if self.initial_data is None:
-            return None
-
-        course_students = self.initial_data.groupby('Course Name').apply(
-            lambda group: ', '.join(group['Candidate Name'])
-        )
-        course_avg = self.initial_data.groupby('Course Name')['Marks'].mean()
-
-        fig = px.bar(
-            course_avg,
-            x=course_avg.values,
-            y=course_avg.index,
-            text=course_students,
-            orientation='h',
-            labels={"x": "Average Marks", "y": "Course Name"},
-            title="Average Performance by Course",
-            template="plotly_white"
-        )
-        fig.update_traces(hovertemplate='Course: %{y}<br>Average Marks: %{x:.2f}<br>Students: %{text}')
-        return fig.to_html(full_html=False)
-
-    def generate_report(self):
-        if self.initial_data is None:
-            return None
-
-        # Add summary statistics
-        performance_summary = self.initial_data.groupby('Course Name')['Marks'].describe()
-
-        # Save to Excel
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            self.initial_data.to_excel(writer, index=False, sheet_name='Raw Data')
-            performance_summary.to_excel(writer, sheet_name='Summary Statistics')
-        
-        output.seek(0)
-        return output
-
-analyzer = PerformanceAnalyzer()
-
-
+    # New fields
+    product_type = db.Column(db.String(50))  # Mobile, laptop, books, etc.
+    branch = db.Column(db.String(50))        # CSE, etc.
+    study_year = db.Column(db.String(20))    # 2nd year, etc.
+    working_condition = db.Column(db.String(50))  # Fully functional, etc.
+    warranty_status = db.Column(db.String(50))    # Yes/No
+    subject = db.Column(db.String(100))      # For books
+    is_fake_warning = db.Column(db.Boolean, default=False)
+def save_image(image):
+    if not image:
+        return None
+    filename = secure_filename(image.filename)
+    # Generate unique filename to prevent overwrites
+    unique_filename = f"{uuid.uuid4()}_{filename}"
+    image_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+    # Ensure upload folder exists
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    image.save(image_path)
+    return f"uploads/{unique_filename}"
 @app.route('/')
 def index():
     return render_template_string('''
-<!DOCTYPE html>
+                                  <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Student Performance Analysis</title>
+    <title>EduTrade - College Marketplace</title>
+    <!-- Add modern dependencies -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11.0.19/dist/sweetalert2.min.css">
     <style>
+        :root {
+            --primary-color: #2563eb;
+            --secondary-color: #3b82f6;
+            --accent-color: #60a5fa;
+            --success-color: #22c55e;
+            --error-color: #ef4444;
+            --text-dark: #1f2937;
+            --text-light: #6b7280;
+            --background-light: #f3f4f6;
+        }
+
         body {
-            font-family: 'Roboto', sans-serif;
-            margin: 0;
-            padding: 0;
-            background: linear-gradient(to bottom, #4facfe, #00f2fe);
-            color: #fff;
+            font-family: 'Inter', sans-serif;
+            background-color: var(--background-light);
+            color: var(--text-dark);
         }
 
-        .container {
-            max-width: 1100px;
-            margin: 50px auto;
-            padding: 30px;
-            background: rgba(255, 255, 255, 0.9);
-            border-radius: 15px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-            color: #333;
+        .navbar {
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 
-        h1 {
-            text-align: center;
-            font-size: 3rem;
-            color: #4facfe;
-            margin-bottom: 20px;
+        .navbar-brand {
             font-weight: 700;
+            color: var(--primary-color);
         }
 
-        .section {
-            margin-bottom: 30px;
-        }
-
-        .card {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 20px;
-            background: #f9f9f9;
-            border-radius: 12px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-        }
-
-        .card h3 {
-            margin: 0;
-            color: #4facfe;
-            font-weight: bold;
-        }
-
-        .card input[type="file"] {
-            margin-right: 15px;
-        }
-
-        .button {
-            background-color: #4facfe;
+        .hero-section {
+            background: linear-gradient(rgba(37,99,235,0.9), rgba(59,130,246,0.9));
+            background-image: ('/static/images/hero-bg.jpg');
+            background-size: cover;
             color: white;
+            padding: 4rem 0;
+            margin-bottom: 2rem;
+        }
+
+        .auth-card {
+            background: white;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .form-control, .form-select {
+            border-radius: 0.5rem;
+            padding: 0.75rem 1rem;
+            border: 1px solid #e5e7eb;
+        }
+
+        .form-control:focus, .form-select:focus {
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 3px rgba(96,165,250,0.2);
+        }
+
+        .btn-primary {
+            background-color: var(--primary-color);
             border: none;
-            padding: 12px 20px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 16px;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
         }
 
-        .actions {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: space-between;
+        .btn-primary:hover {
+            background-color: var(--secondary-color);
         }
 
-        .button:hover {
-            background-color: #00c6ff;
-        }
-
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            margin-top: 15px;
-        }
-
-        th, td {
-            border: 1px solid #ddd;
-            padding: 10px;
-            text-align: left;
-        }
-
-        th {
-            background-color: #4facfe;
-            color: white;
-        }
-
-        .footer {
-            text-align: center;
-            margin-top: 30px;
-            font-size: 14px;
-            color: #666;
-        }
-        .dashboard-card {
+        .listing-card {
             background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            margin: 10px;
-        }
-    
-        .chart-container {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            margin-top: 20px;
-        }
-         .bar span {
-            padding: 5px;
-            writing-mode: vertical-lr;
-            transform: rotate(180deg);
-            text-align: center;
-        }
-        .dashboard-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            padding: 20px;
-        }
-        .dashboard-card {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .dashboard-table {
-            width: 100%;
-            margin-top: 10px;
-        }
-        .dashboard-table td {
-            padding: 8px;
-            border-bottom: 1px solid #eee;
-        }
-        .chart {
-            display: flex;
-            justify-content: space-around;
-            align-items: flex-end;
-            height: 200px;
-            margin-top: 20px;
-        }
-        .bar {
-            width: 60px;
-            min-height: 20px;
-            margin: 0 10px;
-            display: flex;
-            flex-direction: column;
-            justify-content: flex-end;
-            align-items: center;
-            color: white;
-            border-radius: 4px;
-            transition: height 0.3s ease;
-        }
-        
-                
-        .dashboard-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            padding: 20px;
-        }
-
-        .dashboard-card {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-
-        .chart {
-            height: 300px;
-            display: flex;
-            align-items: flex-end;
-            justify-content: space-around;
-            padding: 20px;
-        }
-
-        .bar {
-            width: 60px;
-            margin: 0 10px;
-            position: relative;
-            transition: height 0.3s ease;
-            min-height: 30px;
-        }
-
-        .bar span {
-            position: absolute;
-            bottom: -25px;
-            left: 50%;
-            transform: translateX(-50%);
-            text-align: center;
-            width: 100%;
-            font-size: 12px;
-            color: #333;
-        }
-
-        .dashboard-table {
-            width: 100%;
-            margin-top: 10px;
-        }
-
-        .dashboard-table td {
-            padding: 8px;
-            border-bottom: 1px solid #eee;
-        }
-        .dashboard-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            padding: 20px;
-        }
-
-        .dashboard-card {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-radius: 1rem;
             overflow: hidden;
-        }
-
-        .chart {
-            height: 200px;
-            display: flex;
-            align-items: flex-end;
-            justify-content: space-around;
-            padding: 20px 20px 40px 20px;
-        }
-
-        .bar {
-            width: 40px;
-            margin: 0 5px;
-            position: relative;
-            transition: height 0.3s ease;
-            min-height: 20px;
-        }
-
-        .bar span {
-            position: absolute;
-            bottom: -30px;
-            left: 50%;
-            transform: translateX(-50%) rotate(-45deg);
-            transform-origin: left;
-            text-align: left;
-            width: max-content;
-            font-size: 11px;
-            color: #333;
-            white-space: nowrap;
-        }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 10px;
-            margin-top: 15px;
-        }
-
-        .stat-card {
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 6px;
-            text-align: center;
-        }
-
-        .stat-value {
-            font-size: 24px;
-            font-weight: bold;
-            color: #2196F3;
-        }
-
-        .stat-label {
-            font-size: 12px;
-            color: #666;
-            margin-top: 5px;
-        }
-
-        .course-performance {
-            margin-top: 20px;
-        }
-
-        .course-bar {
-            display: flex;
-            align-items: center;
-            margin: 8px 0;
-        }
-
-        .course-name {
-            width: 120px;
-            font-size: 12px;
-        }
-
-        .course-progress {
-            flex-grow: 1;
-            height: 20px;
-            background: #e9ecef;
-            border-radius: 10px;
-            overflow: hidden;
-        }
-
-        .progress-fill {
+            transition: transform 0.2s, box-shadow 0.2s;
             height: 100%;
-            transition: width 0.3s ease;
         }
 
-        .progress-value {
-            margin-left: 10px;
-            font-size: 12px;
-            width: 50px;
+        .listing-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.1);
         }
 
-        .trend-indicator {
-            display: inline-block;
-            margin-left: 5px;
-            font-size: 14px;
+        .listing-image {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
         }
 
-        .trend-up { color: #4CAF50; }
-        .trend-down { color: #F44336; }
+        .listing-content {
+            padding: 1.5rem;
+        }
 
-    
+        .price-tag {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+
+        .search-section {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+
+        .modal-content {
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .badge {
+            padding: 0.5rem 1rem;
+            border-radius: 2rem;
+            font-weight: 600;
+        }
+
+        .skeleton-loading {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+        }
+
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .hero-section {
+                padding: 2rem 0;
+            }
+            
+            .auth-card {
+                margin: 1rem;
+            }
+        }
+        /* Add these to your existing style section */
+        .hero-section {
+            background: linear-gradient(rgba(211, 213, 216, 0.9), rgba(59,130,246,0.9));
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            padding: 4rem 0;
+        }
+
+        .choice-card {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 1rem;
+            padding: 2rem;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .choice-card:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-5px);
+        }
+
+        .choice-card h3 {
+            margin: 1rem 0;
+        }
+
+        .choice-card p {
+            opacity: 0.9;
+        }
     </style>
 </head>
 <body>
+    <!-- Enhanced Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-light sticky-top">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-graduation-cap me-2"></i>EduTrade
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item" id="authButtons">
+                        <button class="btn btn-outline-primary me-2" onclick="showLoginModal()">
+                            <i class="fas fa-sign-in-alt me-2"></i>Login
+                        </button>
+                        <button class="btn btn-primary" onclick="showRegisterModal()">
+                            <i class="fas fa-user-plus me-2"></i>Register
+                        </button>
+                    </li>
+                    <li class="nav-item dropdown d-none" id="userMenu">
+                        <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="fas fa-user-circle me-2"></i><span id="userName"></span>
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#" onclick="showMyListings()">
+                                <i class="fas fa-list me-2"></i>My Listings
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" onclick="showWishlist()">
+                                <i class="fas fa-heart me-2"></i>Wishlist
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" onclick="showMessages()">
+                                <i class="fas fa-envelope me-2"></i>Messages
+                            </a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="#" onclick="logout()">
+                                <i class="fas fa-sign-out-alt me-2"></i>Logout
+                            </a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero-section text-center">
+        <div class="container">
+            <h1 class="display-4 mb-4">The Fastest Campus Service Provider</h1>
+            <p class="lead mb-4">Your one-stop marketplace for college essentials</p>
+            <div class="row justify-content-center mt-5">
+                <div class="col-md-4">
+                    <div class="choice-card" onclick="handlePathSelection('buy')">
+                        <i class="fas fa-shopping-cart fa-3x mb-3"></i>
+                        <h3>Buy Items</h3>
+                        <p>Browse and purchase items from other students</p>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="choice-card" onclick="handlePathSelection('sell')">
+                        <i class="fas fa-store fa-3x mb-3"></i>
+                        <h3>Sell/Rent Items</h3>
+                        <p>List your items for sale or rent</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
     <div class="container">
-        <h1>🎓 Student Performance Analysis</h1>
-
-        <div class="section">
-            <div class="card">
-                <h3>Upload Initial Data</h3>
-                <div>
-                    <input type="file" id="initialFile" accept=".csv,.xlsx">
-                    <button class="button" onclick="uploadInitial()">Upload</button>
+        <div class="search-section">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="fas fa-search"></i></span>
+                        <input type="text" class="form-control" id="searchInput" placeholder="Search items...">
+                    </div>
                 </div>
-            </div>
-            <div class="card">
-                <h3>Upload Improvement Data</h3>
-                <div>
-                    <input type="file" id="improvementFile" accept=".csv,.xlsx">
-                    <button class="button" onclick="uploadImprovement()">Upload</button>
+                <div class="col-md-3">
+                    <select class="form-select" id="categoryFilter">
+                        <option value="">All Categories</option>
+                        <option value="textbooks">Textbooks</option>
+                        <option value="electronics">Electronics</option>
+                        <option value="furniture">Furniture</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select" id="sortFilter">
+                        <option value="newest">Newest First</option>
+                        <option value="price_low">Price: Low to High</option>
+                        <option value="price_high">Price: High to Low</option>
+                    </select>
                 </div>
             </div>
         </div>
-
-        <div class="section actions">
-            <button class="button" onclick="showAnalysis()">📊 Show Analysis</button>
-            <button class="button" onclick="showTodoCourses()">📋 To-Do Courses</button>
-            <button class="button" onclick="showPairs()">🤝 Pair Students</button>
-            <button class="button" onclick="analyzeImprovementData()">📝 Generate Improvement Data</button>
-            <button class="button" onclick="showImprovement()">📈 Show Improvement</button>
-            <button class="button" onclick="window.location.href='/dashboard'">📊 View Dashboard</button>
-            <button class="button" onclick="window.location.href='/download_report'">⬇️ Download Report</button>
-
+        <div class="row g-4" id="listingsGrid">
+            <!-- Listings will be dynamically added here -->
         </div>
 
-        <div id="results">
-            <h3 style="text-align: center;">Results will appear here...</h3>
-        </div>          
+        <!-- Loading Skeleton -->
+        <div class="row g-4" id="loadingSkeleton" style="display: none;">
+            <!-- Skeleton cards will be added here -->
+        </div>
+    </div>
+    <div id="listingsSection" style="display: none;">
+        <!-- Your existing search-section and listings grid will go here -->
+        <div class="container">
+            <div class="search-section">
+                <!-- Your existing search section content -->
+            </div>
+            <div class="row g-4" id="listingsGrid">
+                <!-- Listings will be dynamically added here -->
+            </div>
+        </div>
+    </div>
+    
+    
+
+    <!-- Search Section -->
+    
+
+        <!-- Listings Grid -->
+        
+
+    <!-- Modals -->
+    <!-- Login Modal -->
+    <div class="modal fade" id="loginModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Login to EduTrade</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="loginForm">
+                        <div class="mb-3">
+                            <label class="form-label">Email</label>
+                            <input type="email" class="form-control" name="email" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Password</label>
+                            <input type="password" class="form-control" name="password" required>
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-sign-in-alt me-2"></i>Login
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <div class="footer">
-        &copy; 2025 Student Performance Analysis | Built with ❤ and 💻
+    <!-- Register Modal -->
+    <div class="modal fade" id="registerModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create Account</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="registerForm">
+                        <div class="mb-3">
+                            <label class="form-label">Email</label>
+                            <input type="email" class="form-control" name="email" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Full Name</label>
+                            <input type="text" class="form-control" name="full_name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Department</label>
+                            <input type="text" class="form-control" name="department" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Year</label>
+                            <select class="form-select" name="year" required>
+                                <option value="">Select Year</option>
+                                <option value="1">1st Year</option>
+                                <option value="2">2nd Year</option>
+                                <option value="3">3rd Year</option>
+                                <option value="4">4th Year</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Password</label>
+                            <input type="password" class="form-control" name="password" required>
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-user-plus me-2"></i>Register
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
     </div>
 
+    <!-- Create Listing Modal -->
+    <div class="modal fade" id="createListingModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create New Listing</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="createListingForm">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Category</label>
+                                <select class="form-select" name="category" id="listingCategory" required>
+                                    <option value="">Select Category</option>
+                                    <option value="electronic">Electronic</option>
+                                    <option value="books">Books</option>
+                                    <option value="clothes">Clothes</option>
+                                </select>
+                            </div>
+    
+                            <div class="col-md-6">
+                                <label class="form-label">Product Type</label>
+                                <select class="form-select" name="product_type" id="productType" required>
+                                    <option value="">Select Product Type</option>
+                                </select>
+                            </div>
+    
+                            <!-- Book-specific fields -->
+                            <div class="col-md-6 book-field" style="display: none;">
+                                <label class="form-label">Subject</label>
+                                <input type="text" class="form-control" name="subject" id="subject">
+                            </div>
+    
+                            <div class="col-md-6 book-field" style="display: none;">
+                                <label class="form-label">Branch</label>
+                                <select class="form-select" name="branch" id="branch">
+                                    <option value="CSE">CSE</option>
+                                </select>
+                            </div>
+    
+                            <div class="col-md-6">
+                                <label class="form-label">Year</label>
+                                <select class="form-select" name="study_year" required>
+                                    <option value="1st year">2nd year</option>
+                                    <option value="2nd year">2nd year</option>
+                                    <option value="3rd year">2nd year</option>
+                                    <option value="4th year">2nd year</option>
+                                </select>
+                            </div>
+    
+                            <div class="col-md-12">
+                                <label class="form-label">Title</label>
+                                <input type="text" class="form-control" name="title" required>
+                            </div>
+    
+                            <div class="col-md-12">
+                                <label class="form-label">Description</label>
+                                <textarea class="form-control" name="description" rows="4" required></textarea>
+                            </div>
+    
+                            <div class="col-md-6">
+                                <label class="form-label">Price (₹)</label>
+                                <input type="number" class="form-control" name="price" required>
+                            </div>
+    
+                            <div class="col-md-6">
+                                <label class="form-label">Working Condition</label>
+                                <select class="form-select" name="working_condition" required>
+                                    <option value="Fully functional">Fully functional</option>
+                                    <option value="Needs repair">Needs repair</option>
+                                </select>
+                            </div>
+    
+                            <div class="col-md-6">
+                                <label class="form-label">Warranty</label>
+                                <select class="form-select" name="warranty_status" required>
+                                    <option value="No">No</option>
+                                    <option value="Yes">Yes</option>
+                                </select>
+                            </div>
+    
+                            <div class="col-md-12">
+                                <label class="form-label">Images</label>
+                                <input type="file" class="form-control" name="image" accept="image/*" required>
+                                <div id="imagePreview" class="mt-2" style="display: none;">
+                                    <img src="" alt="Preview" style="max-width: 200px; max-height: 200px;">
+                                </div>
+                            </div>
+    
+                            <div class="col-md-12">
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="is_fake_warning" id="fakeWarning">
+                                    <label class="form-check-label" for="fakeWarning">
+                                        Warning: Check if you suspect this might be a fake product
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="d-grid mt-4">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-plus-circle me-2"></i>Create Listing
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11.0.19/dist/sweetalert2.min.js"></script>
     <script>
-        function uploadInitial() {
-            const file = document.getElementById('initialFile').files[0];
-            const formData = new FormData();
-            formData.append('file', file);
+        // Enhanced JavaScript functionality
+        let currentUser = null;
+        const modals = {
+            login: new bootstrap.Modal(document.getElementById('loginModal')),
+            register: new bootstrap.Modal(document.getElementById('registerModal')),
+            createListing: new bootstrap.Modal(document.getElementById('createListingModal'))
+        };
+        let currentPath = null;
+
+// Add this function to handle path selection
+        function handlePathSelection(path) {
+            currentPath = path;
             
-            fetch('/upload_initial', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => alert(data.message));
-        }
-
-        function uploadImprovement() {
-            const file = document.getElementById('improvementFile').files[0];
-            const formData = new FormData();
-            formData.append('file', file);
+            if (!currentUser) {
+                showLoginModal();
+                return;
+            }
             
-            fetch('/upload_improvement', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => alert(data.message));
+            handlePathAfterAuth(path);
         }
 
-        function showAnalysis() {
-            fetch('/analysis')
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('results').innerHTML = data.html;
-                });
+        // Add this function to handle path after authentication
+        function handlePathAfterAuth(path) {
+            const heroSection = document.querySelector('.hero-section');
+            const listingsSection = document.getElementById('listingsSection');
+            
+            if (path === 'buy') {
+                heroSection.style.display = 'none';
+                listingsSection.style.display = 'block';
+                loadListings();
+            } else if (path === 'sell') {
+                showCreateListing();
+            }
         }
 
-        function showTodoCourses() {
-            fetch('/todo_courses')
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('results').innerHTML = data.html;
-                });
+        // Utility Functions
+        function showLoading() {
+            document.getElementById('loadingSkeleton').style.display = 'flex';
+            document.getElementById('listingsGrid').style.display = 'none';
         }
 
-        function showPairs() {
-            fetch('/pair_students')
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('results').innerHTML = data.html;
-                });
+        function hideLoading() {
+            document.getElementById('loadingSkeleton').style.display = 'none';
+            document.getElementById('listingsGrid').style.display = 'flex';
         }
-        function analyzeImprovementData() {
-             window.location.href = '/analyze_improvement_data';
-          }
 
-        function showImprovement() {
-            fetch('/improvement')
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('results').innerHTML = data.html;
-                });
+        function showAlert(title, text, icon) {
+            Swal.fire({
+                title,
+                text,
+                icon,
+                confirmButtonColor: '#2563eb'
+            });
         }
-        function showDashboard() {
-            fetch('/dashboard')
-                .then(response => response.json())
-                .then(data => {
-                  document.getElementById('results').innerHTML = data.html;
-                });
+
+        // Modal Functions
+        function showLoginModal() {
+            modals.login.show();
         }
-        function showDashboard() {
-            console.log('Fetching dashboard data...');
-            fetch('/dashboard')
-                .then(response => {
-                    console.log('Response received:', response);
-                    return response.json();
-                })
-                .then(data => {
-                    console.log('Dashboard data:', data);
-                    document.getElementById('results').innerHTML = data.html;
-                })
-                .catch(error => {
-                    console.error('Error fetching dashboard:', error);
-                    document.getElementById('results').innerHTML = 
-                        '<div class="alert alert-danger">Error loading dashboard</div>';
-                });
+
+        function showRegisterModal() {
+            modals.register.show();
         }
-       
+
+        function showCreateListing() {
+            if (!currentUser) {
+                showAlert('Please Login', 'You need to login to create a listing', 'warning');
+                return;
+            }
+            modals.createListing.show();
+        }
+
+        // Authentication Functions
+        function updateAuthUI() {
+            const authButtons = document.getElementById('authButtons');
+            const userMenu = document.getElementById('userMenu');
+            const userName = document.getElementById('userName');
+
+            if (currentUser) {
+                authButtons.classList.add('d-none');
+                userMenu.classList.remove('d-none');
+                userName.textContent = currentUser.full_name;
+            } else {
+                authButtons.classList.remove('d-none');
+                userMenu.classList.add('d-none');
+            }
+        }
+
+        async function logout() {
+            try {
+                await fetch('/logout', {
+                    method: 'GET',
+                    credentials: 'same-origin'
+                });
+                currentUser = null;
+                updateAuthUI();
+                showAlert('Success', 'Logged out successfully', 'success');
+            } catch (error) {
+                showAlert('Error', 'Failed to logout', 'error');
+            }
+        }
+
+        // Listing Functions
+        async function loadListings() {
+            showLoading();
+            try {
+                const query = document.getElementById('searchInput').value;
+                const category = document.getElementById('categoryFilter').value;
+                const sort = document.getElementById('sortFilter').value;
+                
+                let sortBy = 'created_at';
+                if (sort === 'price_low') sortBy = 'price_low';
+                if (sort === 'price_high') sortBy = 'price_high';
+
+                const response = await fetch(`/listings?q=${query}&category=${category}&sort_by=${sortBy}`, {
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to load listings: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                const listings = data.listings;
+                
+                const grid = document.getElementById('listingsGrid');
+                grid.innerHTML = '';
+
+                if (listings.length === 0) {
+                    grid.innerHTML = '<div class="col-12 text-center my-5"><h4>No listings found</h4></div>';
+                    hideLoading();
+                    return;
+                }
+
+                listings.forEach(listing => {
+                    const card = document.createElement('div');
+                    card.className = 'col-md-4 col-lg-3';
+                    
+                    // Handle image URL properly
+                    const imageUrl = listing.image_url ? 
+                        (listing.image_url.startsWith('http') ? listing.image_url : `/static/${listing.image_url}`) : 
+                        '/static/images/placeholder.jpg';
+                    
+                    card.innerHTML = `
+                        <div class="listing-card">
+                            <img src="${imageUrl}" class="listing-image" alt="${listing.title}">
+                            <div class="listing-content">
+                                <h5 class="mb-2">${listing.title}</h5>
+                                <p class="price-tag mb-2">₹${listing.price}</p>
+                                ${listing.rent_price > 0 ? 
+                                    `<p class="text-success mb-2">Rent: ₹${listing.rent_price}/month</p>` : ''}
+                                <p class="mb-2">
+                                    <span class="badge bg-primary">${listing.category}</span>
+                                    <span class="badge bg-secondary">${listing.condition}</span>
+                                </p>
+                                <p class="text-muted mb-3">Posted by ${listing.seller.name}</p>
+                                <div class="d-grid gap-2">
+                                    <button class="btn btn-primary" onclick="contactSeller(${listing.id})">
+                                        <i class="fas fa-envelope me-2"></i>Contact Seller
+                                    </button>
+                                    <button class="btn btn-outline-primary" onclick="addToWishlist(${listing.id})">
+                                        <i class="fas fa-heart me-2"></i>Add to Wishlist
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    grid.appendChild(card);
+                });
+            } catch (error) {
+                console.error('Error loading listings:', error);
+                showAlert('Error', 'Failed to load listings: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function contactSeller(listingId) {
+            if (!currentUser) {
+                showAlert('Please Login', 'You need to login to contact sellers', 'warning');
+                return;
+            }
+            
+            // Implement contact functionality here
+            showAlert('Coming Soon', 'This feature is coming soon!', 'info');
+        }
+
+        function addToWishlist(listingId) {
+            if (!currentUser) {
+                showAlert('Please Login', 'You need to login to add items to wishlist', 'warning');
+                return;
+            }
+            
+            // Implement wishlist functionality here
+            showAlert('Coming Soon', 'This feature is coming soon!', 'info');
+        }
+
+        function showMyListings() {
+            if (!currentUser) {
+                showAlert('Please Login', 'You need to login to view your listings', 'warning');
+                return;
+            }
+            
+            // Implement my listings functionality here
+            showAlert('Coming Soon', 'This feature is coming soon!', 'info');
+        }
+
+        function showWishlist() {
+            if (!currentUser) {
+                showAlert('Please Login', 'You need to login to view your wishlist', 'warning');
+                return;
+            }
+            
+            // Implement wishlist view functionality here
+            showAlert('Coming Soon', 'This feature is coming soon!', 'info');
+        }
+
+        function showMessages() {
+            if (!currentUser) {
+                showAlert('Please Login', 'You need to login to view your messages', 'warning');
+                return;
+            }
+            
+            // Implement messages functionality here
+            showAlert('Coming Soon', 'This feature is coming soon!', 'info');
+        }
+
+        // Check session status on page load
+        async function checkSession() {
+            try {
+                const response = await fetch('/check-session', {
+                    credentials: 'same-origin'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.authenticated) {
+                        currentUser = data.user;
+                        updateAuthUI();
+                    }
+                }
+            } catch (error) {
+                console.error('Session check failed:', error);
+            }
+        }
+
+        // Event Listeners
+        // Modify your DOMContentLoaded event listener
+        document.addEventListener('DOMContentLoaded', () => {
+            // Create skeleton loading cards
+            const skeleton = document.getElementById('loadingSkeleton');
+            for (let i = 0; i < 8; i++) {
+                skeleton.innerHTML += `
+                    <div class="col-md-4 col-lg-3">
+                        <div class="listing-card">
+                            <div class="skeleton-loading" style="height: 200px;"></div>
+                            <div class="listing-content">
+                                <div class="skeleton-loading" style="height: 24px; width: 80%; margin-bottom: 12px;"></div>
+                                <div class="skeleton-loading" style="height: 18px; width: 60%; margin-bottom: 12px;"></div>
+                                <div class="skeleton-loading" style="height: 18px; width: 40%; margin-bottom: 12px;"></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Check if user is logged in
+            checkSession();
+
+            // Don't load listings immediately anymore
+            // Only load when user chooses "Buy" path
+            
+            // Add event listeners for search and filters
+            document.getElementById('searchInput').addEventListener('input', debounce(loadListings, 500));
+            document.getElementById('categoryFilter').addEventListener('change', loadListings);
+            document.getElementById('sortFilter').addEventListener('change', loadListings);
+        });
+        // Form submission handlers with enhanced error handling and validation
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                const formData = new FormData(e.target);
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    body: formData,
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.error || 'Login failed');
+                }
+                
+                const data = await response.json();
+                currentUser = data.user;
+                updateAuthUI();
+                modals.login.hide();
+                e.target.reset();
+                
+                // Add this line to handle the path after successful login
+                if (currentPath) {
+                    handlePathAfterAuth(currentPath);
+                }
+                
+                showAlert('Success', 'Logged in successfully', 'success');
+                
+            } catch (error) {
+                showAlert('Error', error.message, 'error');
+            }
+        });
+
+        document.getElementById('registerForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                const formData = new FormData(e.target);
+                const response = await fetch('/register', {
+                    method: 'POST',
+                    body: formData,
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.error || 'Registration failed');
+                }
+                
+                const data = await response.json();
+                modals.register.hide();
+                e.target.reset();
+                showAlert('Success', data.message || 'Registration successful! Please check your email.', 'success');
+                
+            } catch (error) {
+                showAlert('Error', error.message, 'error');
+            }
+        });
+
+        
+
+        // Utility function for debouncing
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+        const productTypes = {
+            'electronic': ['Mobile', 'laptop','calci'],
+            'books': ['Text books', 'class book','running notes'],
+            'clothes': ['Casual', 'Formal','Apron']
+        };
+        
+        // Image preview handler
+        document.querySelector('input[name="image"]').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const preview = document.getElementById('imagePreview');
+                    preview.style.display = 'block';
+                    preview.querySelector('img').src = e.target.result;
+                }
+                reader.readAsDataURL(file);
+            }
+        });
+        
+        // Category change handler
+        document.getElementById('listingCategory').addEventListener('change', function() {
+            const category = this.value;
+            const productTypeSelect = document.getElementById('productType');
+            const bookFields = document.querySelectorAll('.book-field');
+        
+            // Update product types
+            productTypeSelect.innerHTML = '<option value="">Select Product Type</option>';
+            if (productTypes[category]) {
+                productTypes[category].forEach(type => {
+                    const option = document.createElement('option');
+                    option.value = type.toLowerCase();
+                    option.textContent = type;
+                    productTypeSelect.appendChild(option);
+                });
+            }
+        
+            // Show/hide book-specific fields
+            bookFields.forEach(field => {
+                field.style.display = category === 'books' ? 'block' : 'none';
+            });
+        });
+        
+        // Modify the existing createListingForm submit handler
+        document.getElementById('createListingForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                if (!currentUser) {
+                    throw new Error('You must be logged in to create a listing');
+                }
+                
+                // Show loading state
+                const submitBtn = e.target.querySelector('button[type="submit"]');
+                const originalBtnText = submitBtn.innerHTML;
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Creating...';
+                
+                // Create FormData object
+                const formData = new FormData(e.target);
+                
+                // Additional validation for book category
+                const category = formData.get('category');
+                if (category === 'books') {
+                    if (!formData.get('subject')) {
+                        throw new Error('Please enter the subject for the book');
+                    }
+                    if (!formData.get('branch')) {
+                        throw new Error('Please select a branch');
+                    }
+                }
+                
+                // Ensure proper boolean conversion for is_fake_warning
+                const isFakeWarning = e.target.querySelector('[name="is_fake_warning"]').checked;
+                formData.set('is_fake_warning', isFakeWarning);
+        
+                // Make the API call
+                const response = await fetch('/create-listing', {
+                    method: 'POST',
+                    body: formData, // Send as FormData, not JSON
+                    credentials: 'same-origin'
+                });
+        
+                // Handle non-200 responses
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Failed to create listing');
+                }
+        
+                // Handle success
+                const data = await response.json();
+                modals.createListing.hide();
+                e.target.reset();
+                document.getElementById('imagePreview').style.display = 'none';
+                showAlert('Success', 'Listing created successfully', 'success');
+                loadListings(); // Refresh the listings
+        
+            } catch (error) {
+                showAlert('Error', error.message, 'error');
+            } finally {
+                // Reset button state
+                const submitBtn = e.target.querySelector('button[type="submit"]');
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fas fa-plus-circle me-2"></i>Create Listing';
+            }
+        });
+        // Enhanced JavaScript functionality
+
+        // Add this at the start of your JavaScript
+
     </script>
 </body>
 </html>''')
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
 
-@app.route('/upload_initial', methods=['POST'])
-def upload_initial():
-    if 'file' not in request.files:
-        return jsonify({'success': False, 'message': 'No file part'})
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'success': False, 'message': 'No selected file'})
+# Authentication Routes
+@app.route('/register', methods=['POST'])
+def register():
     try:
-        analyzer.load_initial_data(file)
-        return jsonify({'success': True, 'message': 'Initial data uploaded successfully'})
+        data = request.form
+
+        # Validate input
+        if not all(k in data for k in ['email', 'password', 'full_name', 'department', 'year']):
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        # Check if user already exists
+        if User.query.filter_by(email=data['email']).first():
+            return jsonify({'error': 'Email already registered'}), 400
+
+        # Create verification token
+        verification_token = str(uuid.uuid4())
+
+        # Create new user
+        user = User(
+            email=data['email'],
+            full_name=data['full_name'],
+            department=data['department'],
+            year=data['year'],
+            verification_token=verification_token
+        )
+        user.set_password(data['password'])
+
+        db.session.add(user)
+        db.session.commit()
+
+        # Send verification email
+        send_verification_email(user.email, verification_token)
+
+        return jsonify({
+            'message': 'Registration successful! Please check your email to verify your account.',
+            'user_id': user.id
+        })
+
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
 
-
-@app.route('/upload_improvement', methods=['POST'])
-def upload_improvement():
-    if 'file' not in request.files:
-        return jsonify({'success': False, 'message': 'No file part'})
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'success': False, 'message': 'No selected file'})
+@app.route('/login', methods=['POST'])
+def login():
     try:
-        analyzer.load_improvement_data(file)
-        return jsonify({'success': True, 'message': 'Improvement data uploaded successfully'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
+        data = request.form
 
+        if not all(k in data for k in ['email', 'password']):
+            return jsonify({'error': 'Missing email or password'}), 400
 
-@app.route('/analysis')
-def show_analysis():
-    result, accuracy = analyzer.analyze_performance()
-    if result is None:
-        return jsonify({'html': '<p>No analysis available. Please upload data first.</p>'})
-    
-    html = '<h2>Performance Analysis</h2>'
-    html += f'<p> Random forest Model Accuracy: {accuracy * 100:.2f}%</p>'
-    html += result.to_html(classes='table', index=False)
-    return jsonify({'html': html})
+        user = User.query.filter_by(email=data['email']).first()
 
+        if not user or not user.check_password(data['password']):
+            return jsonify({'error': 'Invalid email or password'}), 401
 
-@app.route('/todo_courses')
-def show_todo_courses():
-    recommendations = analyzer.recommend_courses()
-    if recommendations is None:
-        return jsonify({'html': '<p>No recommendations found for weak students. Please check the data.</p>'})
-    
-    html = '<h2>Recommended Courses for Weak Students</h2>'
-    html += pd.DataFrame(recommendations).to_html(classes='table', index=False)
-    return jsonify({'html': html})
+        if not user.is_verified:
+            return jsonify({'error': 'Please verify your email first'}), 401
 
+        login_user(user)
 
-@app.route('/pair_students')
-def show_pairs():
-    pairs = analyzer.pair_students()
-    if pairs is None:
-        return jsonify({'html': '<p>No pairs found. Please check the data.</p>'})
-    
-    html = '<h2>Student Pairs (Weak with Strong)</h2>'
-    html += pd.DataFrame(pairs).to_html(classes='table', index=False)
-    return jsonify({'html': html})
-
-@app.route('/analyze_improvement_data')
-def analyze_improvement_data():
-    improvement_df = analyzer.analyze_improvement_data()
-    if improvement_df is None:
-        return jsonify({'html': '<p>No initial data available. Please upload data first.</p>'})
-    
-    # Save to Excel
-    excel_file = BytesIO()
-    improvement_df.to_excel(excel_file, index=False)
-    excel_file.seek(0)
-    
-    return send_file(
-        excel_file,
-        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        as_attachment=True,
-        download_name='improvement_data.xlsx'
-    )
-
-
-@app.route('/improvement')
-def show_improvement():
-    improvements = analyzer.analyze_improvement()
-    if improvements is None:
-        return jsonify({'html': '<p>No improvement data available. Please upload data first.</p>'})
-    
-    html = '<h2>Student Improvement</h2>'
-    html += pd.DataFrame(improvements).to_html(classes='table', index=False)
-    return jsonify({'html': html})
-# First, make sure this function is in your PerformanceAnalyzer class
-class PerformanceAnalyzer:
-    def get_dashboard_stats(self):
-        if self.initial_data is None:
-            return {
-                'total_students': 0,
-                'strong_performers': 0,
-                'average_performers': 0,
-                'weak_performers': 0,
-                'improved': 0,
-                'not_improved': 0,
-                'consistently_strong': 0
+        return jsonify({
+            'message': 'Login successful',
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'full_name': user.full_name,
+                'department': user.department,
+                'year': user.year
             }
-            
-        total_students = len(self.initial_data['Candidate Email'].unique())
-        
-        # Performance categories
-        strong = len(self.initial_data[self.initial_data['Marks'] >= 75])
-        average = len(self.initial_data[(self.initial_data['Marks'] >= 60) & (self.initial_data['Marks'] < 75)])
-        weak = len(self.initial_data[self.initial_data['Marks'] < 60])
-        
-        # Improvement analysis
-        improved = 0
-        not_improved = 0
-        consistently_strong = strong
-        
-        if self.improvement_data is not None:
-            try:
-                # Try to merge on both email and course name
-                df = pd.merge(self.initial_data, self.improvement_data, 
-                            on=['Candidate Email', 'Course Name'], 
-                            suffixes=('_initial', '_improved'))
-                
-                improved = len(df[df['Marks_improved'] > df['Marks_initial']])
-                not_improved = len(df[df['Marks_improved'] <= df['Marks_initial']])
-                consistently_strong = len(df[(df['Marks_initial'] >= 75) & (df['Marks_improved'] >= 75)])
-            except:
-                # If merge fails, keep default values
-                pass
-        
-        return {
-            'total_students': total_students,
-            'strong_performers': strong,
-            'average_performers': average,
-            'weak_performers': weak,
-            'improved': improved,
-            'not_improved': not_improved,
-            'consistently_strong': consistently_strong
-        }
-@app.route('/dashboard')
-def show_dashboard():
-    if analyzer.initial_data is None:
-        return '''
-        <div class="container">
-            <h1 style="color: red;">⚠️ Data Missing</h1>
-            <p>Please upload the initial data first to view the dashboard.</p>
-        </div>
-        '''
+        })
 
-    # Generate charts using Plotly
-    performance_chart = analyzer.generate_performance_distribution_chart_with_names()
-    course_chart = analyzer.generate_course_performance_chart_with_names()
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-    # Add descriptive statistics
-    total_students = len(analyzer.initial_data['Candidate Email'].unique())
-    strong_performers = len(analyzer.initial_data[analyzer.initial_data['Marks'] >= 75])
-    average_performers = len(analyzer.initial_data[(analyzer.initial_data['Marks'] >= 60) & 
-                                                   (analyzer.initial_data['Marks'] < 75)])
-    weak_performers = len(analyzer.initial_data[analyzer.initial_data['Marks'] < 60])
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return jsonify({'message': 'Logged out successfully'})
 
-    # Create a dynamic table of student data
-    student_table = analyzer.initial_data.to_html(classes='table', index=False)
+@app.route('/verify-email/<token>')
+def verify_email(token):
+    try:
+        user = User.query.filter_by(verification_token=token).first()
+        if not user:
+            return jsonify({'error': 'Invalid verification token'}), 400
 
-    # Combine charts, stats, and layout
-    dashboard_html = f'''
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Student Performance Dashboard</title>
-        <style>
-            body {{
-                font-family: 'Arial', sans-serif;
-                margin: 0;
-                padding: 0;
-                background: linear-gradient(to bottom, #4facfe, #00f2fe);
-                color: #333;
-            }}
-            .container {{
-                max-width: 1200px;
-                margin: 50px auto;
-                padding: 20px;
-                background: white;
-                border-radius: 15px;
-                box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
-            }}
-            h1 {{
-                text-align: center;
-                color: #4facfe;
-                margin-bottom: 30px;
-                font-weight: bold;
-            }}
-            h3 {{
-                color: #333;
-                margin-bottom: 15px;
-                border-left: 4px solid #4facfe;
-                padding-left: 10px;
-            }}
-            .stats-container {{
-                display: flex;
-                justify-content: space-between;
-                margin-bottom: 40px;
-            }}
-            .stat-card {{
-                background: #f9f9f9;
-                padding: 20px;
-                border-radius: 10px;
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-                text-align: center;
-                flex: 1;
-                margin: 0 10px;
-            }}
-            .stat-card h2 {{
-                color: #4facfe;
-                font-size: 36px;
-                margin: 0;
-            }}
-            .stat-card p {{
-                color: #666;
-                margin: 10px 0 0;
-            }}
-            .chart-container {{
-                margin-bottom: 40px;
-            }}
-            .footer {{
-                text-align: center;
-                margin-top: 40px;
-                font-size: 14px;
-                color: #666;
-            }}
-            .table-container {{
-                margin-top: 40px;
-            }}
-            .table {{
-                width: 100%;
-                border-collapse: collapse;
-                margin-top: 20px;
-            }}
-            .table th, .table td {{
-                border: 1px solid #ddd;
-                padding: 8px;
-                text-align: left;
-            }}
-            .table th {{
-                background-color: #4facfe;
-                color: white;
-            }}
-            .table tr:nth-child(even) {{
-                background-color: #f2f2f2;
-            }}
-            .table tr:hover {{
-                background-color: #ddd;
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>📊 Dashboard: Student Performance</h1>
-            
-            <div class="stats-container">
-                <div class="stat-card">
-                    <h2>{total_students}</h2>
-                    <p>Total Students</p>
-                </div>
-                <div class="stat-card">
-                    <h2>{strong_performers}</h2>
-                    <p>Strong Performers</p>
-                </div>
-                <div class="stat-card">
-                    <h2>{average_performers}</h2>
-                    <p>Average Performers</p>
-                </div>
-                <div class="stat-card">
-                    <h2>{weak_performers}</h2>
-                    <p>Weak Performers</p>
-                </div>
-            </div>
+        user.is_verified = True
+        user.verification_token = None
+        db.session.commit()
 
-            <div class="chart-container">
-                <h3>Performance Distribution</h3>
-                <div>{performance_chart}</div>
-            </div>
-            
-            <div class="chart-container">
-                <h3>Average Performance by Course</h3>
-                <div>{course_chart}</div>
-            </div>
+        return jsonify({'message': 'Email verified successfully'})
 
-            <div class="table-container">
-                <h3>Student Data Table</h3>
-                <p>Below is the detailed table of students with their marks and performance categories:</p>
-                {student_table}
-            </div>
-        </div>
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
 
-        <div class="footer">
-            &copy; 2025 Student Performance Analysis | Built with ❤ and 💻
-        </div>
-    </body>
-    </html>
-    '''
-    return dashboard_html
+@app.route('/forgot-password', methods=['POST'])
+def forgot_password():
+    try:
+        email = request.json.get('email')
+        if not email:
+            return jsonify({'error': 'Email is required'}), 400
+
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            return jsonify({'error': 'Email not found'}), 404
+
+        # Generate reset token
+        reset_token = str(uuid.uuid4())
+        user.reset_token = reset_token
+        user.reset_token_expiry = datetime.utcnow() + timedelta(hours=1)
+        db.session.commit()
+
+        # Send reset email
+        send_reset_email(email, reset_token)
+
+        return jsonify({'message': 'Password reset instructions sent to your email'})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/reset-password', methods=['POST'])
+def reset_password():
+    try:
+        data = request.json
+        if not all(k in data for k in ['token', 'new_password']):
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        user = User.query.filter_by(reset_token=data['token']).first()
+        if not user or user.reset_token_expiry < datetime.utcnow():
+            return jsonify({'error': 'Invalid or expired reset token'}), 400
+
+        user.set_password(data['new_password'])
+        user.reset_token = None
+        user.reset_token_expiry = None
+        db.session.commit()
+
+        return jsonify({'message': 'Password reset successful'})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+# Listing Routes
+@app.route('/create-listing', methods=['POST'])
+@login_required
+def create_listing():
+    try:
+        if 'image' not in request.files:
+            return jsonify({'error': 'No image provided'}), 400
+
+        image = request.files['image']
+        if image.filename == '':
+            return jsonify({'error': 'No image selected'}), 400
+
+        # Save the image and get its path
+        image_url = save_image(image)
+        if not image_url:
+            return jsonify({'error': 'Failed to save image'}), 500
+
+        # Create listing
+        listing = Listing(
+            title=request.form['title'],
+            description=request.form['description'],
+            price=float(request.form['price']),
+            category=request.form['category'],
+            condition=request.form.get('working_condition', 'Not specified'),
+            image_url=image_url,
+            seller_id=current_user.id,
+            product_type=request.form.get('product_type'),
+            branch=request.form.get('branch'),
+            study_year=request.form.get('study_year'),
+            working_condition=request.form.get('working_condition'),
+            warranty_status=request.form.get('warranty_status'),
+            subject=request.form.get('subject'),
+            is_fake_warning=bool(request.form.get('is_fake_warning', False))
+        )
+
+        db.session.add(listing)
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Listing created successfully',
+            'id': listing.id
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/listings')
+def get_listings():
+    try:
+        query = request.args.get('q', '')
+        category = request.args.get('category', '')
+        sort_by = request.args.get('sort_by', 'created_at')
+
+        listings_query = Listing.query
+
+        if query:
+            listings_query = listings_query.filter(
+                db.or_(
+                    Listing.title.ilike(f'%{query}%'),
+                    Listing.description.ilike(f'%{query}%')
+                )
+            )
+
+        if category:
+            listings_query = listings_query.filter_by(category=category)
+
+        if sort_by == 'price_low':
+            listings_query = listings_query.order_by(Listing.price.asc())
+        elif sort_by == 'price_high':
+            listings_query = listings_query.order_by(Listing.price.desc())
+        else:
+            listings_query = listings_query.order_by(Listing.created_at.desc())
+
+        listings = listings_query.all()
+
+        return jsonify({
+            'listings': [{
+                'id': l.id,
+                'title': l.title,
+                'description': l.description,
+                'price': l.price,
+                'rent_price': l.rent_price,
+                'category': l.category,
+                'condition': l.condition,
+                'image_url': l.image_url,
+                'is_for_rent': l.is_for_rent,
+                'created_at': l.created_at.isoformat(),
+                'seller': {
+                    'id': l.seller.id,
+                    'name': l.seller.full_name
+                },
+                # New fields in response
+                'product_type': l.product_type,
+                'branch': l.branch,
+                'study_year': l.study_year,
+                'working_condition': l.working_condition,
+                'warranty_status': l.warranty_status,
+                'subject': l.subject,
+                'is_fake_warning': l.is_fake_warning
+            } for l in listings]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
-@app.route('/download_report')
-def download_report():
-    report = analyzer.generate_report()
-    if report is None:
-        return '<p>No data available. Please upload data first.</p>'
+# Utility functions
+def send_verification_email(email, token):
+    try:
+        msg = Message('Verify your EduTrade account',
+                     sender=app.config['MAIL_USERNAME'],
+                     recipients=[email])
+        msg.body = f'Click the following link to verify your email: {url_for("verify_email", token=token, _external=True)}'
+        mail.send(msg)
+    except Exception as e:
+        print(f"Error sending verification email: {str(e)}")
 
-    return send_file(
-        report,
-        as_attachment=True,
-        download_name='Student_Performance_Report.xlsx',
-        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    )
+def send_reset_email(email, token):
+    try:
+        msg = Message('Reset your EduTrade password',
+                     sender=app.config['MAIL_USERNAME'],
+                     recipients=[email])
+        msg.body = f'Click the following link to reset your password: {url_for("reset_password", token=token, _external=True)}'
+        mail.send(msg)
+    except Exception as e:
+        print(f"Error sending reset email: {str(e)}")
+@app.route('/check-session')
+def check_session():
+    if current_user.is_authenticated:
+        return jsonify({
+            'authenticated': True,
+            'user': {
+                'id': current_user.id,
+                'email': current_user.email,
+                'full_name': current_user.full_name,
+                'department': current_user.department,
+                'year': current_user.year
+            }
+        })
+    return jsonify({'authenticated': False})
 
 if __name__ == '__main__':
-      app.run(debug=True)
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True)
