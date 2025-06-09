@@ -3,6 +3,11 @@ Flask-SQLAlchemy==3.0.5
 Flask-Login==0.6.2
 Flask-Mail==0.9.1
 Werkzeug==2.2.3
-PyJWT==2.8.0
-uuid==1.30
 gunicorn==21.2.0
+PyJWT==2.8.0
+numpy
+pandas
+scikit-learn
+matplotlib
+seaborn
+deap
