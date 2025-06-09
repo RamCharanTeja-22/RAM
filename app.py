@@ -1,2334 +1,1431 @@
-from flask import Flask, render_template_string, jsonify, request, send_from_directory
-from flask_mail import Mail, Message
-import os
+from flask import Flask, render_template, request, jsonify,render_template_string
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 import random
-import string
+from deap import base, creator, tools, algorithms
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
+import matplotlib.pyplot as plt
+import seaborn as sns
+from dataclasses import dataclass
+from typing import List, Dict, Tuple, Any
+import warnings
+import io
+import base64
+import json
+warnings.filterwarnings('ignore')
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'videos'
-app.secret_key = 'your_secret_key_here'  # Added for session management
 
-# Email configuration
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'  # Replace with your email provider's SMTP server
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = 'tutorteach.ai@gmail.com'  # Replace with your email
-app.config['MAIL_PASSWORD'] = 'TUTOR@123'  # Replace with your email password
-app.config['MAIL_DEFAULT_SENDER'] = 'jmadhan087@gmail.com'  # Replace with your email
+# Set random seeds for reproducibility
+np.random.seed(42)
+random.seed(42)
 
-mail = Mail(app)
+@dataclass
+class SymbolicRule:
+    """Represents a symbolic IF-THEN rule for medical diagnosis"""
+    feature: str
+    operator: str  # '>', '<', '>=', '<=', '=='
+    threshold: float
+    prediction: int
+    confidence: float
 
-# Ensure video directory exists
-if not os.path.exists(app.config['UPLOAD_FOLDER']):
-    os.makedirs(app.config['UPLOAD_FOLDER'])
+    def evaluate(self, patient_data: Dict[str, float]) -> Tuple[bool, int, float]:
+        """Evaluate rule against patient data"""
+        feature_value = patient_data.get(self.feature, 0)
 
-# Education data structure
-education_data = {
-    'classes': {
-        '8th': {
-            'subjects': {
-                'Mathematics': {
-                    'topics': [
-                        'Algebra Basics',
-                        'Geometry Fundamentals',
-                        'Linear Equations',
-                        'Statistics'
-                    ]
-                },
-                'Science': {
-                    'topics': [
-                        'Cell Structure',
-                        'Force and Motion',
-                        'Chemical Reactions',
-                        'Energy Forms'
-                    ]
-                }
-            }
-        },
-        '9th': {
-            'subjects': {
-                'Mathematics': {
-                    'topics': [
-                        'Advanced Algebra',
-                        'Trigonometry',
-                        'Coordinate Geometry',
-                        'Probability'
-                    ]
-                },
-                'Science': {
-                    'topics': [
-                        'Atomic Structure',
-                        'Motion Laws',
-                        'Life Processes',
-                        'Environmental Science'
-                    ]
-                }
-            }
-        },
-        '10th': {
-            'subjects': {
-                'Mathematics': {
-                    'topics': [
-                        'Quadratic Equations',
-                        'Arithmetic Progressions',
-                        'Circles',
-                        'Probability'
-                    ]
-                },
-                'Science': {
-                    'topics': [
-                        'Chemical Reactions and Equations',
-                        'Acids, Bases and Salts',
-                        'Life Processes',
-                        'Heredity and Evolution'
-                    ]
-                }
-            }
-        }
-    }
-}
+        if self.operator == '>':
+            applies = feature_value > self.threshold
+        elif self.operator == '<':
+            applies = feature_value < self.threshold
+        elif self.operator == '>=':
+            applies = feature_value >= self.threshold
+        elif self.operator == '<=':
+            applies = feature_value <= self.threshold
+        else:  # ==
+            applies = abs(feature_value - self.threshold) < 0.1
 
-# Content database
-content_db = {
-    "Algebra Basics": [
-        "Algebraic Expressions: An algebraic expression is a combination of terms connected by addition, subtraction, multiplication, or division. Terms are parts of an expression separated by addition or subtraction. Coefficients are numbers multiplying variables in a term. Constants are fixed numbers without variables. Solve more complex equations and inequalities. Learn about polynomials and how to factor them. Explore quadratic equations and their graphs."
-    ],
-    "Geometry Fundamentals": [
-        "Geometry involves shapes, sizes, and the properties of space. Basic concepts include points (dots on paper), lines (straight paths extending in both directions), angles (where two lines meet), and shapes like triangles, squares, and circles."
-    ],
-    "Linear Equations": [
-        "Understand equations that form straight lines when graphed, solve problems like y=2x+3, and learn how to find the slope and intercepts of a line."
-    ],
-    "Statistics": [
-        "Collect and organize data using tables and graphs, learn about mean, median, and mode, and interpret bar graphs, pie charts, and line graphs."
-    ],
-    "Cell Structure": [
-        "Discover the basic unit of life, the cell, learn about its parts (nucleus, mitochondria, cell membrane), and compare plant and animal cells."
-    ],
-    "Force and Motion": [
-        "Understand how forces make objects move, stop, or change direction, learn about Newton’s laws of motion, and explore speed, velocity, and acceleration."
-    ],
-    "Chemical Reactions": [
-        "Study how substances combine or break apart to form new materials, learn about signs of a chemical reaction (bubbles, heat, color change), and explore simple reactions like burning or rusting."
-    ],
-    "Energy Forms": [
-        "Discover different types of energy (kinetic, potential, heat, light), learn how energy is transferred and transformed, and explore renewable and non-renewable energy sources."
-    ],
-    "Advanced Algebra": [
-        "Solve complex equations and inequalities, learn about polynomials and factoring, and explore quadratic equations and their graphs."
-    ],
-    "Trigonometry": [
-        "Study triangles and their angles, learn about sine, cosine, and tangent ratios, and apply trigonometry to solve real-world problems like finding heights or distances."
-    ],
-    "Coordinate Geometry": [
-        "Plot points on a graph using coordinates (x, y), learn how to find the distance between two points and the midpoint of a line, and explore the equations of lines and circles."
-    ],
-    "Probability": [
-        "Understand the chances of events happening, learn to calculate probabilities using fractions, decimals, and percentages, and explore independent and dependent events."
-    ],
-    "Atomic Structure": [
-        "Dive into the structure of atoms (protons, neutrons, electrons), learn about the periodic table and how elements are organized, and explore isotopes and atomic models."
-    ],
-    "Motion Laws": [
-        "Study Newton’s three laws of motion in detail, understand concepts like inertia, force, and momentum, and solve problems involving motion and forces."
-    ],
-    "Life Processes": [
-        "Learn how living organisms function (nutrition, respiration, excretion), explore the human body systems (digestive, respiratory, circulatory), and understand how plants and animals adapt to their environments."
-    ],
-    "Environmental Science": [
-        "Study ecosystems and the balance of nature, learn about natural resources and their conservation, and explore environmental issues like pollution, deforestation, and climate change."
-    ],
-    "Quadratic Equations": [
-        "Learn about quadratic equations, their solutions, and how to graph them. Understand the discriminant and its significance in determining the nature of roots."
-    ],
-    "Arithmetic Progressions": [
-        "Understand the concept of arithmetic progressions, find the nth term, and the sum of the first n terms. Solve real-world problems using arithmetic progressions."
-    ],
-    "Circles": [
-        "Explore the properties of circles, including chords, tangents, and angles subtended by chords. Learn about the theorems related to circles and their applications."
-    ],
-    "Chemical Reactions and Equations": [
-        "Understand the types of chemical reactions, balancing chemical equations, and the importance of chemical reactions in daily life."
-    ],
-    "Acids, Bases and Salts": [
-        "Learn about the properties of acids, bases, and salts. Understand the pH scale, neutralization reactions, and the uses of acids, bases, and salts."
-    ],
-    "Heredity and Evolution": [
-        "Study the principles of heredity and variation. Understand the concepts of evolution, natural selection, and the evidence for evolution."
-    ]
-}
+        return applies, self.prediction, self.confidence
 
-# HTML template with integrated login/registration
-HTML_TEMPLATE = '''
-<!DOCTYPE html>
+    def __str__(self):
+        return f"IF {self.feature} {self.operator} {self.threshold:.2f} THEN diagnosis={self.prediction} (conf={self.confidence:.2f})"
+
+class MedicalDatasetGenerator:
+    """Generate synthetic medical dataset with realistic patterns"""
+
+    def __init__(self, n_samples=1000):
+        self.n_samples = n_samples
+        self.feature_names = [
+            'age', 'blood_pressure_systolic', 'blood_pressure_diastolic',
+            'cholesterol', 'blood_sugar', 'heart_rate', 'bmi',
+            'exercise_hours_per_week', 'smoking_years', 'family_history'
+        ]
+        self.conditions = ['Healthy', 'Diabetes', 'Heart Disease', 'Hypertension']
+
+    def generate_dataset(self):
+        """Generate realistic medical dataset"""
+        data = []
+        labels = []
+
+        for _ in range(self.n_samples):
+            # Base patient profile
+            age = np.random.normal(45, 15)
+            age = max(18, min(90, age))
+
+            # Generate correlated features
+            # Healthy patients (25%)
+            if np.random.random() < 0.25:
+                bp_sys = np.random.normal(120, 10)
+                bp_dia = np.random.normal(80, 8)
+                cholesterol = np.random.normal(180, 20)
+                blood_sugar = np.random.normal(90, 10)
+                heart_rate = np.random.normal(70, 10)
+                bmi = np.random.normal(22, 3)
+                exercise = np.random.normal(4, 2)
+                smoking = 0 if np.random.random() > 0.2 else np.random.normal(2, 3)
+                family_hist = 1 if np.random.random() < 0.3 else 0
+                label = 0  # Healthy
+
+            # Diabetes patients (25%)
+            elif np.random.random() < 0.33:
+                bp_sys = np.random.normal(140, 15)
+                bp_dia = np.random.normal(90, 10)
+                cholesterol = np.random.normal(220, 30)
+                blood_sugar = np.random.normal(160, 40)  # High blood sugar
+                heart_rate = np.random.normal(75, 12)
+                bmi = np.random.normal(28, 4)  # Higher BMI
+                exercise = np.random.normal(2, 1.5)  # Less exercise
+                smoking = np.random.normal(8, 5) if np.random.random() > 0.4 else 0
+                family_hist = 1 if np.random.random() < 0.6 else 0  # Higher family history
+                label = 1  # Diabetes
+
+            # Heart Disease patients (25%)
+            elif np.random.random() < 0.5:
+                bp_sys = np.random.normal(150, 20)
+                bp_dia = np.random.normal(95, 12)
+                cholesterol = np.random.normal(240, 35)  # High cholesterol
+                blood_sugar = np.random.normal(100, 15)
+                heart_rate = np.random.normal(80, 15)
+                bmi = np.random.normal(27, 4)
+                exercise = np.random.normal(1.5, 1)  # Low exercise
+                smoking = np.random.normal(12, 6) if np.random.random() > 0.3 else 0
+                family_hist = 1 if np.random.random() < 0.7 else 0
+                label = 2  # Heart Disease
+
+            # Hypertension patients (25%)
+            else:
+                bp_sys = np.random.normal(160, 20)  # High BP
+                bp_dia = np.random.normal(100, 15)  # High BP
+                cholesterol = np.random.normal(200, 25)
+                blood_sugar = np.random.normal(95, 12)
+                heart_rate = np.random.normal(75, 12)
+                bmi = np.random.normal(26, 4)
+                exercise = np.random.normal(2.5, 1.5)
+                smoking = np.random.normal(6, 4) if np.random.random() > 0.5 else 0
+                family_hist = 1 if np.random.random() < 0.5 else 0
+                label = 3  # Hypertension
+
+            # Ensure realistic bounds
+            patient = [
+                max(18, min(90, age)),
+                max(80, min(200, bp_sys)),
+                max(50, min(120, bp_dia)),
+                max(120, min(350, cholesterol)),
+                max(60, min(300, blood_sugar)),
+                max(50, min(120, heart_rate)),
+                max(15, min(45, bmi)),
+                max(0, min(10, exercise)),
+                max(0, smoking),  # Can be 0
+                family_hist
+            ]
+
+            data.append(patient)
+            labels.append(label)
+
+        df = pd.DataFrame(data, columns=self.feature_names)
+        df['diagnosis'] = labels
+        return df
+HTML_TEMPLATE='''<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TutorTeach.ai - Modern Learning Experience</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <title>Neuro-Symbolic Medical Diagnosis System</title>
     <style>
-        /* CSS Variables for Color Scheme */
-        :root {
-            --primary-color: #4A90E2; /* Soft blue */
-            --secondary-color: #50E3C2; /* Teal */
-            --accent-color: #F5A623; /* Orange */
-            --danger-color: #D0021B; /* Red */
-            --text-color: #2C3E50; /* Dark gray */
-            --text-light: #7F8C8D; /* Light gray */
-            --light-bg: #F5F7FA; /* Light background */
-            --white: #FFFFFF; /* White */
-            --gradient: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-        }
-
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            transition: all 0.3s ease;
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: var(--light-bg);
-            color: var(--text-color);
-            line-height: 1.6;
+            font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            animation: backgroundShift 10s ease-in-out infinite alternate;
         }
 
-        .page {
-            display: none;
-            animation: fadeIn 0.5s ease;
+        @keyframes backgroundShift {
+            0% { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+            100% { background: linear-gradient(135deg, #764ba2 0%, #667eea 100%); }
         }
 
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-
-        .page.active {
-            display: block;
-        }
-
-        header {
-            background: var(--primary-color);
-            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-            position: fixed;
-            width: 100%;
-            top: 0;
-            z-index: 1000;
-        }
-
-        nav {
-            max-width: 1200px;
+        .container {
+            max-width: 1400px;
             margin: 0 auto;
-            padding: 1rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            background: rgba(255, 255, 255, 0.98);
+            border-radius: 24px;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
         }
 
-        .logo {
-            font-size: 1.8rem;
-            font-weight: bold;
-            color: var(--white);
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
-            cursor: pointer;
-        }
-
-        nav ul {
-            display: flex;
-            gap: 2rem;
-            list-style: none;
-        }
-
-        nav ul li a {
-            color: var(--white);
-            text-decoration: none;
-            font-weight: 500;
-            padding: 0.5rem 1rem;
-            border-radius: 25px;
-            transition: all 0.3s ease;
-            cursor: pointer;
-        }
-
-        nav ul li a:hover {
-            background-color: rgba(255, 255, 255, 0.2);
-            transform: translateY(-2px);
-        }
-
-        .dropdown {
+        .header {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #3498db 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
             position: relative;
+            overflow: hidden;
         }
 
-        .dropdown-content {
-            display: none;
+        .header::before {
+            content: '';
             position: absolute;
-            background-color: var(--white);
-            min-width: 160px;
-            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="20" cy="20" r="2" fill="rgba(255,255,255,0.1)"><animate attributeName="opacity" values="0;1;0" dur="3s" repeatCount="indefinite"/></circle><circle cx="80" cy="30" r="1.5" fill="rgba(255,255,255,0.1)"><animate attributeName="opacity" values="0;1;0" dur="2s" repeatCount="indefinite" begin="1s"/></circle><circle cx="40" cy="70" r="1" fill="rgba(255,255,255,0.1)"><animate attributeName="opacity" values="0;1;0" dur="4s" repeatCount="indefinite" begin="2s"/></circle></svg>');
+            pointer-events: none;
+        }
+
+        .header h1 {
+            font-size: 3em;
+            margin-bottom: 15px;
+            text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.3);
+            font-weight: 700;
+            letter-spacing: -1px;
+            position: relative;
             z-index: 1;
-            border-radius: 8px;
-            overflow: hidden;
         }
 
-        .dropdown-content a {
-            color: var(--text-color);
-            padding: 12px 16px;
-            text-decoration: none;
-            display: block;
-            transition: background-color 0.3s ease;
-        }
-
-        .dropdown-content a:hover {
-            background-color: var(--light-bg);
-        }
-
-        .dropdown:hover .dropdown-content {
-            display: block;
-        }
-
-        main {
-            margin-top: 80px;
-            padding: 2rem;
-            max-width: 1200px;
-            margin-left: auto;
-            margin-right: auto;
-        }
-
-        .auth-container {
-            max-width: 400px;
-            margin: 100px auto;
-            padding: 2rem;
-            background: var(--white);
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-
-        .auth-form {
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-        }
-
-        .form-group {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
-
-        .form-group label {
-            font-weight: 500;
-            color: var(--text-color);
-        }
-
-        .form-group input {
-            padding: 0.75rem;
-            border: 1px solid #e2e8f0;
-            border-radius: 4px;
-            font-size: 1rem;
-        }
-
-        .auth-switch {
-            margin-top: 1rem;
-            text-align: center;
-            color: var(--text-light);
-        }
-
-        .auth-switch a {
-            color: var(--primary-color);
-            text-decoration: none;
-            cursor: pointer;
-            font-weight: 500;
-        }
-
-        .error-message {
-            color: var(--danger-color);
-            font-size: 0.875rem;
-            margin-top: 0.5rem;
-        }
-
-        .success-message {
-            color: #10B981;
-            font-size: 0.875rem;
-            margin-top: 0.5rem;
-        }
-
-        .hero {
-            text-align: center;
-            padding: 6rem 2rem;
-            background: var(--gradient);
-            border-radius: 30px;
-            margin-bottom: 3rem;
+        .header p {
+            font-size: 1.3em;
+            opacity: 0.95;
+            font-weight: 300;
             position: relative;
-            overflow: hidden;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            z-index: 1;
         }
 
-        .hero h1 {
-            font-size: 3.5rem;
-            margin-bottom: 1.5rem;
-            color: var(--white);
-            position: relative;
-        }
-
-        .hero p {
-            font-size: 1.3rem;
-            color: var(--white);
-            max-width: 700px;
-            margin: 0 auto 2rem;
-            position: relative;
-        }
-
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 1.5rem;
-            margin-top: 2rem;
-        }
-
-        .card {
-            background: var(--white);
-            padding: 1.5rem;
-            border-radius: 1rem;
-            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
-            cursor: pointer;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-
-        .card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);
-        }
-
-        .button {
-            background: var(--primary-color);
-            color: var(--white);
-            padding: 1rem 2rem;
-            border: none;
+        .system-status {
+            display: inline-flex;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 10px 20px;
             border-radius: 25px;
-            cursor: pointer;
+            margin-top: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #e74c3c;
+            margin-right: 10px;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.trained {
+            background: #27ae60;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            padding: 40px;
+        }
+
+        .section {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.08);
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #3498db, #2ecc71, #f39c12, #e74c3c);
+            background-size: 300% 100%;
+            animation: gradientShift 3s ease-in-out infinite;
+        }
+
+        @keyframes gradientShift {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+
+        .section:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.12);
+        }
+
+        .section h2 {
+            color: #2c3e50;
+            margin-bottom: 25px;
+            font-size: 1.8em;
             font-weight: 600;
+            position: relative;
+            padding-bottom: 15px;
+        }
+
+        .section h2::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 50px;
+            height: 3px;
+            background: linear-gradient(90deg, #3498db, #2ecc71);
+            border-radius: 2px;
+        }
+
+        .train-section {
+            text-align: center;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+            border: none;
+            padding: 18px 36px;
+            border-radius: 50px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: all 0.4s ease;
             text-transform: uppercase;
+            font-weight: 600;
             letter-spacing: 1px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            min-width: 200px;
         }
 
-        .button:hover {
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .btn:hover::before {
+            left: 100%;
+        }
+
+        .btn:hover {
             transform: translateY(-3px);
-            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+            box-shadow: 0 15px 25px rgba(52, 152, 219, 0.4);
         }
 
-        .button:disabled {
-            background: var(--text-light);
+        .btn:active {
+            transform: translateY(-1px);
+        }
+
+        .btn:disabled {
+            background: linear-gradient(135deg, #bdc3c7, #95a5a6);
             cursor: not-allowed;
             transform: none;
             box-shadow: none;
         }
 
-        .content-display {
-            font-size: 1.2rem;
-            line-height: 1.6;
-            margin: 1rem 0;
-            padding: 1rem;
-            background: var(--light-bg);
-            border-radius: 8px;
+        .btn-success {
+            background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
         }
 
-        #video-player {
-            border-radius: 8px;
-            margin-top: 1rem;
+        .btn-success:hover {
+            box-shadow: 0 15px 25px rgba(39, 174, 96, 0.4);
         }
 
-        @media (max-width: 768px) {
-            .hero h1 {
-                font-size: 2.5rem;
-            }
-
-            nav ul {
-                display: none;
-                position: absolute;
-                top: 100%;
-                left: 0;
-                width: 100%;
-                background: var(--primary-color);
-                padding: 1rem;
-                flex-direction: column;
-                align-items: center;
-            }
-
-            nav ul.active {
-                display: flex;
-            }
-
-            .menu-toggle {
-                display: block;
-                color: var(--white);
-                font-size: 1.5rem;
-                cursor: pointer;
-            }
+        .form-group {
+            margin-bottom: 25px;
+            position: relative;
         }
 
-        /* Animations */
-        @keyframes slideInFromLeft {
-            0% {
-                transform: translateX(-100%);
-                opacity: 0;
-            }
-            100% {
-                transform: translateX(0);
-                opacity: 1;
-            }
-        }
-
-        @keyframes slideInFromRight {
-            0% {
-                transform: translateX(100%);
-                opacity: 0;
-            }
-            100% {
-                transform: translateX(0);
-                opacity: 1;
-            }
-        }
-
-        @keyframes slideInFromTop {
-            0% {
-                transform: translateY(-100%);
-                opacity: 0;
-            }
-            100% {
-                transform: translateY(0);
-                opacity: 1;
-            }
-        }
-
-        @keyframes slideInFromBottom {
-            0% {
-                transform: translateY(100%);
-                opacity: 0;
-            }
-            100% {
-                transform: translateY(0);
-                opacity: 1;
-            }
-        }
-
-        .slide-in-left {
-            animation: slideInFromLeft 1s ease-out;
-        }
-
-        .slide-in-right {
-            animation: slideInFromRight 1s ease-out;
-        }
-
-        .slide-in-top {
-            animation: slideInFromTop 1s ease-out;
-        }
-
-        .slide-in-bottom {
-            animation: slideInFromBottom 1s ease-out;
-        }
-
-        /* Background bubbles */
-        .bubbles {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-        }
-
-        .bubbles li {
-            position: absolute;
-            list-style: none;
+        .form-group label {
             display: block;
-            width: 20px;
-            height: 20px;
-            background: rgba(255, 255, 255, 0.2);
-            animation: animate 25s linear infinite;
-            bottom: -150px;
-        }
-
-        .bubbles li:nth-child(1) {
-            left: 25%;
-            width: 80px;
-            height: 80px;
-            animation-delay: 0s;
-        }
-
-        .bubbles li:nth-child(2) {
-            left: 10%;
-            width: 20px;
-            height: 20px;
-            animation-delay: 2s;
-            animation-duration: 12s;
-        }
-
-        .bubbles li:nth-child(3) {
-            left: 70%;
-            width: 20px;
-            height: 20px;
-            animation-delay: 4s;
-        }
-
-        .bubbles li:nth-child(4) {
-            left: 40%;
-            width: 60px;
-            height: 60px;
-            animation-delay: 0s;
-            animation-duration: 18s;
-        }
-
-        .bubbles li:nth-child(5) {
-            left: 65%;
-            width: 20px;
-            height: 20px;
-            animation-delay: 0s;
-        }
-
-        .bubbles li:nth-child(6) {
-            left: 75%;
-            width: 110px;
-            height: 110px;
-            animation-delay: 3s;
-        }
-
-        .bubbles li:nth-child(7) {
-            left: 35%;
-            width: 150px;
-            height: 150px;
-            animation-delay: 7s;
-        }
-
-        .bubbles li:nth-child(8) {
-            left: 50%;
-            width: 25px;
-            height: 25px;
-            animation-delay: 15s;
-            animation-duration: 45s;
-        }
-
-        .bubbles li:nth-child(9) {
-            left: 20%;
-            width: 15px;
-            height: 15px;
-            animation-delay: 2s;
-            animation-duration: 35s;
-        }
-
-        .bubbles li:nth-child(10) {
-            left: 85%;
-            width: 150px;
-            height: 150px;
-            animation-delay: 0s;
-            animation-duration: 11s;
-        }
-
-        @keyframes animate {
-            0% {
-                transform: translateY(0) rotate(0deg);
-                opacity: 1;
-                border-radius: 0;
-            }
-            100% {
-                transform: translateY(-1000px) rotate(720deg);
-                opacity: 0;
-                border-radius: 50%;
-            }
-        }
-
-        /* Profile image */
-        .profile-image {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            object-fit: cover;
-            margin-right: 10px;
-        }
-
-        /* Contact form */
-        .contact-form {
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 2rem;
-            background: var(--white);
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-
-        .contact-form .form-group {
-            margin-bottom: 1rem;
-        }
-
-        .contact-form .form-group label {
-            font-weight: 500;
-            color: var(--text-color);
-        }
-
-        .contact-form .form-group input,
-        .contact-form .form-group textarea {
-            width: 100%;
-            padding: 0.75rem;
-            border: 1px solid #e2e8f0;
-            border-radius: 4px;
-            font-size: 1rem;
-        }
-
-        .contact-form .form-group textarea {
-            resize: vertical;
-            min-height: 150px;
-        }
-
-        .contact-form .button {
-            width: 100%;
-            margin-top: 1rem;
-        }
-
-        /* Testimonials Section */
-        .testimonials {
-            padding: 4rem 2rem;
-            background: var(--light-bg);
-        }
-
-        .testimonials h2 {
-            text-align: center;
-            margin-bottom: 2rem;
-        }
-
-        .testimonial-card {
-            background: var(--white);
-            padding: 1.5rem;
-            border-radius: 1rem;
-            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
-            margin-bottom: 1.5rem;
-        }
-
-        .testimonial-card img {
-            width: 80px;
-            height: 80px;
-            border-radius: 50%;
-            object-fit: cover;
-            margin-bottom: 1rem;
-        }
-
-        .testimonial-card h3 {
-            margin-bottom: 0.5rem;
-        }
-
-        .testimonial-card p {
-            font-style: italic;
-            color: var(--text-light);
-        }
-
-        /* Footer Section */
-        footer {
-            background: var(--primary-color);
-            color: var(--white);
-            padding: 2rem;
-            text-align: center;
-        }
-
-        footer .footer-links {
-            margin-bottom: 1rem;
-        }
-
-        footer .footer-links a {
-            color: var(--white);
-            text-decoration: none;
-            margin: 0 1rem;
-        }
-
-        footer .footer-links a:hover {
-            text-decoration: underline;
-        }
-
-        footer .social-icons {
-            margin-bottom: 1rem;
-        }
-
-        footer .social-icons a {
-            color: var(--white);
-            margin: 0 0.5rem;
-            font-size: 1.5rem;
-        }
-
-        footer .social-icons a:hover {
-            color: var(--secondary-color);
-        }
-
-        footer .copyright {
-            font-size: 0.875rem;
-            color: var(--white);
-        }
-
-        /* Live Chat Icon */
-        .live-chat {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: var(--primary-color);
-            color: var(--white);
-            padding: 1rem;
-            border-radius: 50%;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-            cursor: pointer;
-        }
-
-        .live-chat:hover {
-            background: var(--secondary-color);
-        }
-
-        /* AI Stats Section */
-        .ai-stats {
-            padding: 4rem 2rem;
-            background: var(--gradient);
-            color: var(--white);
-            text-align: center;
-        }
-
-        .ai-stats h2 {
-            margin-bottom: 2rem;
-        }
-
-        .ai-stats .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1.5rem;
-        }
-
-        .ai-stats .stat {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 1.5rem;
-            border-radius: 1rem;
-        }
-
-        .ai-stats .stat h3 {
-            font-size: 2rem;
-            margin-bottom: 0.5rem;
-        }
-
-        .ai-stats .stat p {
-            font-size: 1rem;
-        }
-
-        /* Video Demo Section */
-        .video-demo {
-            padding: 4rem 2rem;
-            background: var(--light-bg);
-            text-align: center;
-        }
-
-        .video-demo h2 {
-            margin-bottom: 2rem;
-        }
-
-        .video-container {
-            max-width: 800px;
-            margin: 0 auto;
-        }
-
-        .video-container iframe {
-            width: 100%;
-            height: 400px;
-            border-radius: 8px;
-        }
-
-        /* Blurred Class Selection */
-        .blurred {
-            filter: blur(5px);
-            pointer-events: none;
-        }
-
-        /* Testimonials Scroll Animation */
-        .testimonials-scroll {
-            display: flex;
-            overflow-x: auto;
-            scroll-snap-type: x mandatory;
-            gap: 1.5rem;
-            padding-bottom: 1rem;
-        }
-
-        .testimonials-scroll .testimonial-card {
-            flex: 0 0 auto;
-            scroll-snap-align: start;
-            width: 300px;
-        }
-
-        /* AI Stats Counter Animation */
-        @keyframes countUp {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .stat h3 {
-            animation: countUp 1s ease-out;
-        }
-
-        /* About Developers Section */
-        .about-developers {
-            padding: 4rem 2rem;
-            background: var(--light-bg);
-            text-align: center;
-        }
-
-        .about-developers h2 {
-            margin-bottom: 2rem;
-        }
-
-        .developers-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1.5rem;
-        }
-
-        .developer-card {
-            background: var(--white);
-            padding: 1.5rem;
-            border-radius: 1rem;
-            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
-        }
-
-        .developer-card img {
-            width: 100px;
-            height: 100px;
-            border-radius: 50%;
-            object-fit: cover;
-            margin-bottom: 1rem;
-        }
-
-        .developer-card h3 {
-            margin-bottom: 0.5rem;
-        }
-
-        .developer-card p {
-            font-style: italic;
-            color: var(--text-light);
-        }
-
-        .developer-card .social-links {
-            margin-top: 1rem;
-        }
-
-        .developer-card .social-links a {
-            color: var(--primary-color);
-            margin: 0 0.5rem;
-            font-size: 1.5rem;
-        }
-
-        .developer-card .social-links a:hover {
-            color: var(--secondary-color);
-        }
-
-        /* What's New Section */
-        .whats-new {
-            padding: 4rem 2rem;
-            background: var(--light-bg);
-            text-align: center;
-        }
-
-        .whats-new h2 {
-            margin-bottom: 2rem;
-        }
-
-        .whats-new .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 1.5rem;
-        }
-
-        .whats-new .card {
-            background: var(--white);
-            padding: 1.5rem;
-            border-radius: 1rem;
-            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
-            cursor: pointer;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-
-        .whats-new .card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);
-        }
-
-        .whats-new .card h3 {
-            margin-bottom: 1rem;
-        }
-
-        .whats-new .card p {
-            font-size: 1rem;
-            color: var(--text-light);
-        }
-
-        /* Learning Path Navigation */
-        .learning-path-nav {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 1rem;
-        }
-
-        .learning-path-nav .button {
-            width: 48%; 
-        }
-        #features-page {
-            padding: 2rem;
-            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8f0 100%);
-            min-height: 100vh;
-        }
-
-        .hero {
-            text-align: center;
-            margin-bottom: 3rem;
-            position: relative;
-        }
-
-        .hero h1 {
-            font-size: 3rem;
-            color: #2d3748;
-            margin-bottom: 2rem;
-            font-weight: 700;
-            position: relative;
-            display: inline-block;
-        }
-
-        .hero h1::after {
-            content: '';
-            position: absolute;
-            bottom: -10px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 0;
-            height: 3px;
-            background: #4a90e2;
-            animation: underline 1s ease forwards 0.5s;
-        }
-
-        @keyframes underline {
-            to {
-                width: 100%;
-            }
-        }
-
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 2rem;
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-
-        .feature-card {
-            background: white;
-            border-radius: 12px;
-            padding: 2rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-            cursor: pointer;
-        }
-
-        .feature-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 4px;
-            background: linear-gradient(90deg, #4a90e2, #63b3ed);
-            transform: scaleX(0);
-            transform-origin: left;
-            transition: transform 0.3s ease;
-        }
-
-        .feature-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
-        }
-
-        .feature-card:hover::before {
-            transform: scaleX(1);
-        }
-
-        .feature-icon {
-            font-size: 2.5rem;
-            color: #4a90e2;
-            margin-bottom: 1.5rem;
-            text-align: center;
-            transition: transform 0.3s ease;
-        }
-
-        .feature-card:hover .feature-icon {
-            transform: scale(1.1) rotate(5deg);
-        }
-
-        .feature-card h2 {
-            font-size: 1.5rem;
-            color: #2d3748;
-            margin-bottom: 1rem;
+            margin-bottom: 8px;
+            color: #2c3e50;
             font-weight: 600;
+            font-size: 0.95em;
             transition: color 0.3s ease;
         }
 
-        .feature-card:hover h2 {
-            color: #4a90e2;
-        }
-
-        .feature-card p {
-            color: #4a5568;
-            line-height: 1.6;
-            margin-bottom: 1rem;
-        }
-
-        .feature-explanation {
-            padding-top: 1rem;
-            border-top: 1px solid #e2e8f0;
-            margin-top: 1rem;
-            opacity: 0;
-            transform: translateY(20px);
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 15px 18px;
+            border: 2px solid #ecf0f1;
+            border-radius: 12px;
+            font-size: 1em;
             transition: all 0.3s ease;
-            max-height: 0;
-            overflow: hidden;
+            background: #fafbfc;
         }
 
-        .feature-card:hover .feature-explanation {
-            opacity: 1;
-            transform: translateY(0);
-            max-height: 200px;
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #3498db;
+            background: white;
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+            transform: translateY(-1px);
         }
 
-        .feature-explanation p {
-            font-size: 0.95rem;
-            color: #718096;
+        .form-group input:focus + .form-group label,
+        .form-group select:focus + .form-group label {
+            color: #3498db;
         }
 
-        /* Animation Classes */
-        .slide-in-left {
-            opacity: 0;
-            animation: slideInLeft 0.6s ease-out forwards;
+        .feature-info {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            border: 1px solid #dee2e6;
         }
 
-        .slide-in-right {
-            opacity: 0;
-            animation: slideInRight 0.6s ease-out forwards;
+        .feature-info h3 {
+            color: #495057;
+            margin-bottom: 10px;
+            font-size: 1.1em;
         }
 
-        @keyframes slideInLeft {
-            from {
-                opacity: 0;
-                transform: translateX(-50px);
-            }
-            to {
-                opacity: 1;
-                transform: translateX(0);
-            }
+        .feature-info p {
+            color: #6c757d;
+            font-size: 0.9em;
+            line-height: 1.4;
         }
 
-        @keyframes slideInRight {
-            from {
-                opacity: 0;
-                transform: translateX(50px);
-            }
-            to {
-                opacity: 1;
-                transform: translateX(0);
-            }
-        }
-
-        /* Stagger animation delay for cards */
-        .feature-card:nth-child(1) { animation-delay: 0.1s; }
-        .feature-card:nth-child(2) { animation-delay: 0.2s; }
-        .feature-card:nth-child(3) { animation-delay: 0.3s; }
-        .feature-card:nth-child(4) { animation-delay: 0.4s; }
-        .feature-card:nth-child(5) { animation-delay: 0.5s; }
-        .feature-card:nth-child(6) { animation-delay: 0.6s; }
-        .feature-card:nth-child(7) { animation-delay: 0.7s; }
-        .feature-card:nth-child(8) { animation-delay: 0.8s; }
-
-        /* Responsive Design */
-        @media (max-width: 768px) {
-            #features-page {
-                padding: 1rem;
-            }
-            
-            .hero h1 {
-                font-size: 2.5rem;
-            }
-            
-            .grid {
-                grid-template-columns: 1fr;
-                gap: 1.5rem;
-            }
-            
-            .feature-card {
-                padding: 1.5rem;
-            }
-        }
-
-        /* Ensure Font Awesome icons are styled properly */
-        .fas {
-            display: inline-block;
-            width: 1em;
-            height: 1em;
-            vertical-align: -0.125em;
-        }
-        /* ... (keeping previous base styles) ... */
-
-/* Add these new styles to your existing CSS */
-
-/* Modify the existing p styles for first paragraph */
-        .feature-card p:first-of-type {
-            color: #4a5568;
-            line-height: 1.6;
-            margin-bottom: 1rem;
-            opacity: 0;
-            transform: translateY(-20px);
-            transition: opacity 0.3s ease, transform 0.3s ease;
+        .status {
+            margin: 25px 0;
+            padding: 18px;
+            border-radius: 12px;
+            text-align: center;
+            font-weight: 600;
+            transition: all 0.3s ease;
             position: relative;
-            z-index: 2;
-        }
-
-        .feature-card:hover p:first-of-type {
-            opacity: 1;
-            transform: translateY(0);
-        }
-
-        /* Replace your existing feature-explanation styles with these */
-        .feature-explanation {
-            padding-top: 1rem;
-            border-top: 1px solid #e2e8f0;
-            margin-top: 1rem;
-            opacity: 0;
-            transform: translateY(20px);
-            transition: all 0.5s ease;
-            max-height: 0;
             overflow: hidden;
-            /* Add delay for second stage */
-            transition-delay: 0.3s;
         }
 
-        .feature-card:hover .feature-explanation {
-            opacity: 1;
-            transform: translateY(0);
-            max-height: 200px;
-        }
-
-        /* Add this new indicator style */
-        .feature-card::after {
+        .status::before {
             content: '';
             position: absolute;
-            bottom: 0;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 2px;
+            background: currentColor;
+            animation: statusSlide 1.5s ease-in-out;
+        }
+
+        @keyframes statusSlide {
+            0% { left: -100%; }
+            100% { left: 100%; }
+        }
+
+        .status.success {
+            background: linear-gradient(135deg, #d5edda 0%, #c3e6cb 100%);
+            color: #155724;
+            border: 2px solid #c3e6cb;
+        }
+
+        .status.error {
+            background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+            color: #721c24;
+            border: 2px solid #f5c6cb;
+        }
+
+        .status.info {
+            background: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%);
+            color: #0c5460;
+            border: 2px solid #bee5eb;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 24px;
+            height: 24px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top: 3px solid currentColor;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 12px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .results {
+            margin-top: 25px;
+        }
+
+        .prediction-result {
+            background: linear-gradient(135deg, #e8f8f5 0%, #d5f4e6 100%);
+            border: 3px solid #27ae60;
+            border-radius: 16px;
+            padding: 25px;
+            margin: 20px 0;
+            position: relative;
+            overflow: hidden;
+            animation: slideIn 0.5s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .prediction-result::before {
+            content: '🏥';
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            font-size: 2em;
+            opacity: 0.3;
+        }
+
+        .diagnosis {
+            font-size: 1.5em;
+            font-weight: 700;
+            color: #27ae60;
+            margin-bottom: 15px;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.1);
+        }
+
+        .explanation {
+            color: #2c3e50;
+            font-style: italic;
+            line-height: 1.6;
+            background: rgba(255, 255, 255, 0.7);
+            padding: 15px;
+            border-radius: 10px;
+            border-left: 4px solid #3498db;
+        }
+
+        .rules-list {
+            max-height: 400px;
+            overflow-y: auto;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #dee2e6;
+        }
+
+        .rules-list::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .rules-list::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        .rules-list::-webkit-scrollbar-thumb {
+            background: #3498db;
+            border-radius: 4px;
+        }
+
+        .rule-item {
+            background: white;
+            margin: 12px 0;
+            padding: 16px;
+            border-radius: 10px;
+            border-left: 5px solid #3498db;
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            font-size: 0.9em;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .rule-item:hover {
+            transform: translateX(5px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .accuracy-display {
+            background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+            border: 3px solid #f0ad4e;
+            border-radius: 16px;
+            padding: 20px;
+            text-align: center;
+            margin: 20px 0;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .accuracy-display::before {
+            content: '📊';
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            font-size: 2em;
+            opacity: 0.3;
+        }
+
+        .accuracy-display .accuracy-value {
+            font-size: 2.5em;
+            font-weight: 800;
+            color: #e67e22;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .accuracy-label {
+            font-size: 1.1em;
+            color: #d68910;
+            font-weight: 600;
+            margin-top: 5px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 12px;
+            padding: 5px;
+            border: 1px solid #dee2e6;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 12px 20px;
+            text-align: center;
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            color: #6c757d;
+        }
+
+        .tab.active {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+            box-shadow: 0 2px 8px rgba(52, 152, 219, 0.3);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #ecf0f1;
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3498db, #2ecc71);
+            width: 0%;
+            transition: width 0.3s ease;
+            border-radius: 3px;
+        }
+
+        @media (max-width: 1024px) {
+            .main-content {
+                grid-template-columns: 1fr;
+                gap: 30px;
+                padding: 30px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                margin: 10px;
+                border-radius: 16px;
+            }
+
+            .main-content {
+                padding: 20px;
+                gap: 20px;
+            }
+
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+
+            .header h1 {
+                font-size: 2.2em;
+            }
+
+            .header p {
+                font-size: 1.1em;
+            }
+
+            .section {
+                padding: 20px;
+            }
+        }
+
+        .tooltip {
+            position: relative;
+        }
+
+        .tooltip::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 125%;
             left: 50%;
             transform: translateX(-50%);
-            width: 0;
-            height: 2px;
-            background: #4a90e2;
-            transition: width 0.3s ease;
+            background: #2c3e50;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 0.8em;
+            white-space: nowrap;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+            z-index: 1000;
         }
 
-        .feature-card:hover::after {
-            width: 90%;
-        }
-
-        /* Add loading indicator animation */
-        @keyframes pulse {
-            0% { opacity: 0.6; }
-            50% { opacity: 1; }
-            100% { opacity: 0.6; }
-        }
-
-        .feature-card:hover::before {
-            animation: pulse 2s infinite;
+        .tooltip:hover::after {
+            opacity: 1;
+            visibility: visible;
         }
     </style>
 </head>
 <body>
-    <header>
-        <nav>
-            <div class="logo" onclick="showPage('home')">TutorTeach.ai</div>
-            <div class="menu-toggle">
-                <i class="fas fa-bars"></i>
-            </div>
-            <ul>
-                <li><a onclick="showPage('home')"><i class="fas fa-home"></i> Home</a></li>
-                <li><a onclick="showPage('features')"><i class="fas fa-star"></i> Features</a></li>
-                <li><a onclick="showPage('learning-path')"><i class="fas fa-road"></i> Learning Path</a></li>
-                <li class="dropdown">
-                    <a id="authButton"><i class="fas fa-user"></i> Profile</a>
-                    <div class="dropdown-content">
-                        <a onclick="showProfile()">My Profile</a>
-                        <a onclick="showDashboard()">My Dashboard</a>
-                        <a onclick="logout()">Logout</a>
-                    </div>
-                </li>
-            </ul>
-        </nav>
-    </header>
-
-    <main>
-        <!-- Home Page -->
-        <div id="home-page" class="page active">
-            <section class="hero">
-                 <img src="../images/1.jpeg" alt="Home Banner" class="hero-image">
-        
-                <h1>Transform Your Learning Journey</h1>
-                <p>Welcome to TutorTeach.ai - Your AI-powered learning companion that adapts to your unique needs.</p>
-                <button class="button" onclick="startJourney()">Start Your Journey</button>
-            </section>
-            <section class="why-choose-us">
-                <h2>Why Choose Us?</h2>
-                <div class="grid">
-                    <div class="card slide-in-left">
-                        <h2>Personalized Learning</h2>
-                        <p>AI-driven content tailored to your learning style and pace.</p>
-                    </div>
-                    <div class="card slide-in-right">
-                        <h2>Interactive Lessons</h2>
-                        <p>Engage with dynamic content and real-time feedback.</p>
-                    </div>
-                    <div class="card slide-in-left">
-                        <h2>Progress Tracking</h2>
-                        <p>Monitor your growth with detailed analytics and insights.</p>
-                    </div>
-                    <div class="card slide-in-right">
-                        <h2>AI-Generated Video Content</h2>
-                        <p>Generates tailored video lessons based on the user's selected topic, providing an engaging and dynamic learning experience.</p>
-                    </div>
-                    <div class="card slide-in-left">
-                        <h2>Knowledge Assessment</h2>
-                        <p>Creates fill-in-the-blank and other interactive questions to test user understanding of the selected topic, predicting scores based on responses.</p>
-                    </div>
-                    <div class="card slide-in-right">
-                        <h2>Strength and Weakness Analysis</h2>
-                        <p>Identifies the user’s stronger and weaker sections in the chosen topic to provide personalized insights for improvement.</p>
-                    </div>
-                    <div class="card slide-in-left">
-                        <h2>Focused Remedial Content</h2>
-                        <p>Generates additional video solutions focusing on weaker sections, ensuring comprehensive understanding and mastery of the topic.</p>
-                    </div>
-                    <div class="card slide-in-right">
-                        <h2>Holistic Learning Support</h2>
-                        <p>Monitors individual performance to teach values, ethics, discipline, and communication skills alongside academic content, fostering overall development.</p>
-                    </div>
-                </div>
-            </section>
-                <section class="testimonials">
-                <h2>What Our Users Say</h2>
-                <div class="testimonials-scroll">
-                    <div class="testimonial-card">
-                        <img src="https://i.ibb.co/PjZVfr3/Screenshot-2025-01-08-052901.png"  alt="User 1">
-                        <h3>Karthik</h3>
-                        <p>"TutorTeach.ai has completely transformed the way I learn. The personalized lessons are amazing!"</p>
-                    </div>
-                    <div class="testimonial-card">
-                        <img src="https://i.ibb.co/RHpQ4tK/vkr.jpg" alt="User 2">
-                        <h3>Vinodh Kumar</h3>
-                        <p>"The AI-generated videos are so engaging. I’ve never enjoyed learning this much before!"</p>
-                    </div>
-                    <div class="testimonial-card">
-                        <img src="https://i.ibb.co/MBLrSTQ/karna.jpg" " alt="User 3">
-                        <h3>Karuna Karan</h3>
-                        <p>"The progress tracking feature helps me stay motivated and focused on my goals."</p>
-                    </div>
-                    <div class="testimonial-card">
-                        <img src="https://i.ibb.co/Jcxy1JW/vijay.jpg" alt="User 4">
-                        <h3>Vijay</h3>
-                        <p>"The AI-driven content is tailored perfectly to my learning style. Highly recommended!"</p>
-                    </div>
-                    <div class="testimonial-card">
-                        <img src="https://i.ibb.co/hd1bNRn/nikhil.jpg" alt="User 5">
-                        <h3>Nikhil</h3>
-                        <p>"The interactive lessons and real-time feedback have made learning so much more effective."</p>
-                    </div>
-                </div>
-            </section>
-            <section class="ai-stats">
-                <h2>AI Stats</h2>
-                <div class="stats-grid">
-                    <div class="stat">
-                        <h3 id="topics-covered">0</h3>
-                        <p>Topics Covered</p>
-                    </div>
-                    <div class="stat">
-                        <h3 id="students-benefited">0</h3>
-                        <p>Students Benefited</p>
-                    </div>
-                    <div class="stat">
-                        <h3 id="satisfaction-rate">0</h3>
-                        <p>Satisfaction Rate</p>
-                    </div>
-                </div>
-            </section>
-            <section class="video-demo">
-                <h2>How It Works</h2>
-                <div class="video-container">
-                    <iframe width="100%" height="400" src="https://www.youtube.com/embed/nKl2FgALO-c" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-                </div>
-            </section>
-            <section class="about-developers">
-                <h2>About Developers</h2>
-                <div class="developers-grid">
-                    <div class="developer-card">
-                        <img src="https://i.ibb.co/6Nr58md/myprofile1.jpg" alt="My Profile">
-                        <h3>J Madhan</h3>
-                        <p>AI & Machine Learning Expert, GEN_AI Explorer </p>
-                        <div class="social-links">
-                            <a href="https://www.linkedin.com/in/j-madhan-6b90a32b1" target="_blank"><i class="fab fa-linkedin"></i></a>
-                            <a href="https://www.instagram.com/_officialmadhan?igsh=ZjFjaXg3a21jZmw0" target="_blank"><i class="fab fa-instagram"></i></a>
-                        </div>
-                    </div>
-                    <div class="developer-card">
-                        <img src="https://i.postimg.cc/50qpjsc6/ram.jpg" alt="profile">
-                        <h3> N L Ram Charan Teja </h3>
-                        <p>Full Stack Developer</p>
-                        <div class="social-links">
-                            <a href="https://www.linkedin.com/in/n-l-ram-charan-teja-ba2b25288/" target="_blank"><i class="fab fa-linkedin"></i></a>
-                            <a href="https://www.instagram.com/ramcharanteja_nl?igsh=MWJncmNhNnpuNDVndQ==" target="_blank"><i class="fab fa-instagram"></i></a>
-                        </div>
-                    </div>
-                    <div class="developer-card">
-                        <img src="https://i.ibb.co/18XVx3D/Whats-App-Image-2025-01-07-at-21-09-01-6e1dc378.jpg" alt="Developer 3">
-                        <h3>M Praveen</h3>
-                        <p>UI/UX Designer</p>
-                        <div class="social-links">
-                            <a href="https://www.linkedin.com/in/m-praveen-kumar-64bb19315?utm_source=share&utm_campaign=share_via&utm_content=profile&utm_medium=android_app" target="_blank"><i class="fab fa-linkedin"></i></a>
-                            <a href="https://www.instagram.com/professional_praveen3?igsh=MzNwOTk2M2FwanE3" target="_blank"><i class="fab fa-instagram"></i></a>
-                        </div>
-                    </div>
-                    <div class="developer-card">
-                        <img src="https://i.ibb.co/fMSncvP/Whats-App-Image-2025-01-07-at-20-57-53-31232a64.jpg" alt="Developer 4">
-                        <h3>K Harsha Vardhan</h3>
-                        <p>Backend Developer</p>
-                        <div class="social-links">
-                            <a href="https://linkedin.com/in/bobbrown" target="_blank"><i class="fab fa-linkedin"></i></a>
-                            <a href="https://www.instagram.com/harsha_harry._?igsh=MWVpM3Vxanl0N2pkZQ==" target="_blank"><i class="fab fa-instagram"></i></a>
-                        </div>
-                    </div>
-                </div>
-            </section>
-            <section class="contact-us">
-                <h2>Contact Us</h2>
-                <div class="contact-form">
-                    <form onsubmit="handleContactForm(event)">
-                        <div class="form-group">
-                            <label for="contactName">Name</label>
-                            <input type="text" id="contactName" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="contactEmail">Email</label>
-                            <input type="email" id="contactEmail" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="contactMessage">Message</label>
-                            <textarea id="contactMessage" required></textarea>
-                        </div>
-                        <button type="submit" class="button">Send Message</button>
-                    </form>
-                </div>
-            </section>
-            <section class="whats-new">
-                <h2>What's New</h2>
-                <div class="grid">
-                    <div class="card">
-                        <h3>Latest Innovations and Updates in AI and Technology</h3>
-                        <p>Explore advanced AI solutions like TutorTeach.ai and Teachmate.ai.</p>
-                    </div>
-                    <div class="card">
-                        <h3>AI-Based Learning Solutions</h3>
-                        <p>Real-time AI models for personalized education. Tools for assignment creation, video learning, and student progress tracking.</p>
-                    </div>
-                    <div class="card">
-                        <h3>Explore Our Features</h3>
-                        <p>Topic Selection: Choose from a wide range of educational topics. Video Generation: AI-generated video content for in-depth learning. Knowledge Assessment: Interactive quizzes and score prediction. Performance Insights: Identify strengths and weaknesses in learning. Customized Solutions: AI-based feedback to improve weak areas.</p>
-                    </div>
-                    <div class="card">
-                        <h3>For Educators and Institutions</h3>
-                        <p>Comprehensive Tools: Create, track, and enhance student engagement. Development Programs: Enhance teaching methodologies using AI. Integration Options: Seamlessly integrate with existing systems like Microsoft Teams and Azure.</p>
-                    </div>
-                    <div class="card">
-                        <h3>For Students and Parents</h3>
-                        <p>Exclusive deals on AI-based educational tools. Free access to Azure and learning platforms for students. Personalized learning experiences with real-time feedback.</p>
-                    </div>
-                    <div class="card">
-                        <h3>Developer & IT</h3>
-                        <p>Access APIs for AI video processing, student tracking, and quiz generation. Explore open-source tools like TensorFlow, Hugging Face, and Flask. Documentation and tutorials for seamless integration into educational environments.</p>
-                    </div>
-                    <div class="card">
-                        <h3>Get Involved</h3>
-                        <p>Participate in educational hackathons and competitions. Leverage cloud solutions for scalable learning platforms. Stay updated with community support and insights.</p>
-                    </div>
-                    <div class="card">
-                        <h3>About Us</h3>
-                        <p>Innovating education with AI-powered tools. Committed to privacy, sustainability, and accessibility. Partnering with global leaders to redefine learning experiences.</p>
-                    </div>
-                </div>
-            </section>
-            <div class="bubbles">
-                <li></li>
-                <li></li>
-                <li></li>
-                <li></li>
-                <li></li>
-                <li></li>
-                <li></li>
-                <li></li>
-                <li></li>
-                <li></li>
+    <div class="container">
+        <div class="header">
+            <h1>🧠 Neuro-Symbolic Medical AI</h1>
+            <p>Advanced Hybrid Intelligence for Medical Diagnosis</p>
+            <div class="system-status">
+                <div class="status-indicator" id="statusIndicator"></div>
+                <span id="statusText">System Not Trained</span>
             </div>
         </div>
 
-        <!-- Features Page -->
-        <div id="features-page" class="page">
-            <section class="hero">
-                <h1>Our Features</h1>
-                <div class="grid">
-                    <!-- Personalized Learning -->
-                    <div class="feature-card slide-in-left">
-                        <div class="feature-icon">
-                            <i class="fas fa-user-graduate"></i>
-                        </div>
-                        <h2>Personalized Learning</h2>
-                        <p>AI-driven content tailored to your learning style and pace.</p>
-                        <div class="feature-explanation">
-                            <p>Our AI analyzes your learning patterns and adapts the content to match your strengths and weaknesses, ensuring a personalized learning experience.</p>
-                        </div>
-                    </div>
-
-                    <!-- Interactive Lessons -->
-                    <div class="feature-card slide-in-right">
-                        <div class="feature-icon">
-                            <i class="fas fa-chalkboard-teacher"></i>
-                        </div>
-                        <h2>Interactive Lessons</h2>
-                        <p>Engage with dynamic content and real-time feedback.</p>
-                        <div class="feature-explanation">
-                            <p>Interactive lessons with quizzes, polls, and real-time feedback keep you engaged and help reinforce your understanding of the topic.</p>
-                        </div>
-                    </div>
-
-                    <!-- Progress Tracking -->
-                    <div class="feature-card slide-in-left">
-                        <div class="feature-icon">
-                            <i class="fas fa-chart-line"></i>
-                        </div>
-                        <h2>Progress Tracking</h2>
-                        <p>Monitor your growth with detailed analytics and insights.</p>
-                        <div class="feature-explanation">
-                            <p>Track your progress with detailed analytics, including completed lessons, quiz scores, and time spent on each topic.</p>
-                        </div>
-                    </div>
-
-                    <!-- AI-Generated Video -->
-                    <div class="feature-card slide-in-right">
-                        <div class="feature-icon">
-                            <i class="fas fa-video"></i>
-                        </div>
-                        <h2>AI-Generated Video</h2>
-                        <p>Generates tailored video lessons based on your selected topic.</p>
-                        <div class="feature-explanation">
-                            <p>Our AI creates custom video lessons tailored to your learning needs, making complex topics easier to understand.</p>
-                        </div>
-                    </div>
-
-                    <!-- Knowledge Assessment -->
-                    <div class="feature-card slide-in-left">
-                        <div class="feature-icon">
-                            <i class="fas fa-question-circle"></i>
-                        </div>
-                        <h2>Knowledge Assessment</h2>
-                        <p>Tests your understanding with interactive questions.</p>
-                        <div class="feature-explanation">
-                            <p>Take quizzes and tests to assess your knowledge. Our AI predicts your score and provides feedback to help you improve.</p>
-                        </div>
-                    </div>
-
-                    <!-- Strength and Weakness Analysis -->
-                    <div class="feature-card slide-in-right">
-                        <div class="feature-icon">
-                            <i class="fas fa-balance-scale"></i>
-                        </div>
-                        <h2>Strength and Weakness Analysis</h2>
-                        <p>Identifies your stronger and weaker sections.</p>
-                        <div class="feature-explanation">
-                            <p>Our AI analyzes your performance to identify your strengths and weaknesses, helping you focus on areas that need improvement.</p>
-                        </div>
-                    </div>
-
-                    <!-- Focused Remedial Content -->
-                    <div class="feature-card slide-in-left">
-                        <div class="feature-icon">
-                            <i class="fas fa-book-open"></i>
-                        </div>
-                        <h2>Focused Remedial Content</h2>
-                        <p>Generates additional content for weaker sections.</p>
-                        <div class="feature-explanation">
-                            <p>Get additional video lessons and practice questions tailored to your weaker sections to ensure comprehensive understanding.</p>
-                        </div>
-                    </div>
-
-                    <!-- Holistic Learning Support -->
-                    <div class="feature-card slide-in-right">
-                        <div class="feature-icon">
-                            <i class="fas fa-hands-helping"></i>
-                        </div>
-                        <h2>Holistic Learning Support</h2>
-                        <p>Teaches values, ethics, and communication skills.</p>
-                        <div class="feature-explanation">
-                            <p>Beyond academics, our platform helps you develop values, ethics, discipline, and communication skills for overall growth.</p>
-                        </div>
-                    </div>
+        <div class="main-content">
+            <div class="section train-section">
+                <h2>🚀 System Training</h2>
+                <div class="feature-info">
+                    <h3>Hybrid AI Architecture</h3>
+                    <p>This system combines deep neural networks with evolutionary symbolic reasoning to provide explainable medical diagnoses with high accuracy.</p>
                 </div>
-            </section>
-        </div>
 
-        <!-- Learning Path Page -->
-        <div id="learning-path-page" class="page">
-            <div class="breadcrumb" id="breadcrumb"></div>
-            <div id="class-selection" class="grid fade-in">
-                <!-- Classes will be dynamically inserted here -->
-            </div>
-            <div id="subject-selection" class="grid fade-in hidden">
-                <!-- Subjects will be dynamically inserted here -->
-            </div>
-            <div id="topic-selection" class="grid fade-in hidden">
-                <!-- Topics will be dynamically inserted here -->
-            </div>
-            <div id="content-section" class="hidden">
-                <div class="card">
-                    <h2 id="content-title"></h2>
-                    <div id="content-display" class="content-display"></div>
-                    <button id="mark-complete-button" class="button" onclick="markComplete()" disabled>Mark as Complete</button>
-                </div>
-            </div>
-            <div id="video-section" class="hidden">
-                <div class="card">
-                    <h2>Video: <span id="video-title"></span></h2>
-                    <video id="video-player" controls width="100%">
-                        Your browser does not support the video tag.
-                    </video>
-                    <div class="learning-path-nav">
-                        <button class="button" onclick="previousTopic()">Previous</button>
-                        <button class="button" onclick="startQuiz()" id="next-button" disabled>Take Quiz</button>
-                    </div>
-                </div>
-            </div>
-            <div id="navigation" class="hidden">
-                <button class="back-button" onclick="goBack()">
-                    <i class="fas fa-arrow-left"></i> Go Back
+                <button id="trainBtn" class="btn" onclick="trainSystem()">
+                    <span id="trainBtnText">Initialize Training</span>
                 </button>
-            </div>
-        </div>
 
-        <!-- Profile Page -->
-        <div id="profile-page" class="page">
-            <div class="auth-container">
-                <h2 class="text-2xl font-bold mb-4 text-center">My Profile</h2>
-                <form class="auth-form" onsubmit="updateProfile(event)">
-                    <div class="form-group">
-                        <label for="registeredName">Registered Name</label>
-                        <input type="text" id="registeredName" disabled>
-                    </div>
-                    <div class="form-group">
-                        <label for="displayName">Display Name</label>
-                        <input type="text" id="displayName" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="profileEmail">Email</label>
-                        <input type="email" id="profileEmail" disabled>
-                    </div>
-                    <div class="form-group">
-                        <label for="profilePhoto">Profile Photo</label>
-                        <input type="file" id="profilePhoto" accept="image/*">
-                    </div>
-                    <div class="form-group">
-                        <label for="currentPassword">Current Password</label>
-                        <input type="password" id="currentPassword" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="newPassword">New Password</label>
-                        <input type="password" id="newPassword" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="confirmNewPassword">Confirm New Password</label>
-                        <input type="password" id="confirmNewPassword" required>
-                    </div>
-                    <button type="submit" class="button">Update Profile</button>
-                    <div id="profileMessage"></div>
-                </form>
-            </div>
-        </div>
-
-        <!-- Dashboard Page -->
-        <div id="dashboard-page" class="page">
-            <div class="auth-container">
-                <h2 class="text-2xl font-bold mb-4 text-center">My Dashboard</h2>
-                <div class="card">
-                    <h2>Progress</h2>
+                <div id="trainingProgress" class="hidden">
                     <div class="progress-bar">
-                        <div style="width: 50%;"></div> <!-- Example progress -->
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <p>Training neural networks and evolving symbolic rules...</p>
+                </div>
+
+                <div id="trainStatus"></div>
+
+                <div id="accuracyDisplay" class="hidden">
+                    <div class="accuracy-display">
+                        <div class="accuracy-value" id="accuracyValue">0%</div>
+                        <div class="accuracy-label">System Accuracy</div>
                     </div>
                 </div>
-                <div class="card">
-                    <h2>Lessons Completed</h2>
-                    <p id="lessons-completed">5</p> <!-- Example data -->
-                </div>
-                <div class="card">
-                    <h2>Lessons Ongoing</h2>
-                    <p id="lessons-ongoing">3</p> <!-- Example data -->
-                </div>
-                <div class="card">
-                    <h2>Percentage of Progress</h2>
-                    <p id="progress-percentage">50%</p> <!-- Example data -->
+
+                <div id="rulesSection" class="hidden">
+                    <h3>🔍 Discovered Rules</h3>
+                    <div class="rules-list" id="rulesList"></div>
                 </div>
             </div>
-        </div>
 
-        <!-- Login Page -->
-        <div id="login-page" class="page">
-            <div class="auth-container">
-                <h2 class="text-2xl font-bold mb-4 text-center">Login</h2>
-                <form class="auth-form" onsubmit="handleLogin(event)">
-                    <div class="form-group">
-                        <label for="loginEmail">Email</label>
-                        <input type="email" id="loginEmail" required>
+            <div class="section">
+                <h2>🏥 Patient Diagnosis</h2>
+
+                <div class="tabs">
+                    <button class="tab active" onclick="switchTab('basic')">Basic Info</button>
+                    <button class="tab" onclick="switchTab('vitals')">Vitals</button>
+                    <button class="tab" onclick="switchTab('lifestyle')">Lifestyle</button>
+                </div>
+
+                <form id="patientForm">
+                    <div class="tab-content active" id="basic-content">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="tooltip" data-tooltip="Patient's age in years">Age (years)</label>
+                                <input type="number" id="age" min="1" max="120" value="45" required>
+                            </div>
+                            <div class="form-group">
+                                <label class="tooltip" data-tooltip="Body Mass Index calculated from height and weight">BMI</label>
+                                <input type="number" id="bmi" step="0.1" min="10" max="50" value="25" required>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="tooltip" data-tooltip="Family history of medical conditions (0=No, 1=Yes)">Family History</label>
+                            <select id="family_history" required>
+                                <option value="0">No Family History</option>
+                                <option value="1">Yes, Family History Present</option>
+                            </select>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="loginPassword">Password</label>
-                        <input type="password" id="loginPassword" required>
+
+                    <div class="tab-content" id="vitals-content">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="tooltip" data-tooltip="Systolic blood pressure (top number)">Systolic BP (mmHg)</label>
+                                <input type="number" id="blood_pressure_systolic" min="70" max="250" value="120" required>
+                            </div>
+                            <div class="form-group">
+                                <label class="tooltip" data-tooltip="Diastolic blood pressure (bottom number)">Diastolic BP (mmHg)</label>
+                                <input type="number" id="blood_pressure_diastolic" min="40" max="150" value="80" required>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="tooltip" data-tooltip="Resting heart rate in beats per minute">Heart Rate (bpm)</label>
+                                <input type="number" id="heart_rate" min="40" max="200" value="70" required>
+                            </div>
+                            <div class="form-group">
+                                <label class="tooltip" data-tooltip="Blood sugar level in mg/dL">Blood Sugar (mg/dL)</label>
+                                <input type="number" id="blood_sugar" min="50" max="400" value="90" required>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="tooltip" data-tooltip="Total cholesterol level in mg/dL">Cholesterol (mg/dL)</label>
+                            <input type="number" id="cholesterol" min="100" max="400" value="180" required>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="loginClass">Select Class</label>
-                        <select id="loginClass" required>
-                            <option value="8th">8th</option>
-                            <option value="9th">9th</option>
-                            <option value="10th">10th</option>
-                        </select>
+
+                    <div class="tab-content" id="lifestyle-content">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="tooltip" data-tooltip="Hours of exercise per week">Exercise (hours/week)</label>
+                                <input type="number" id="exercise_hours_per_week" step="0.5" min="0" max="20" value="3" required>
+                            </div>
+                            <div class="form-group">
+                                <label class="tooltip" data-tooltip="Number of years of smoking (0 if never smoked)">Smoking Years</label>
+                                <input type="number" id="smoking_years" min="0" max="70" value="0" required>
+                            </div>
+                        </div>
                     </div>
-                    <button type="submit" class="button">Login</button>
-                    <div id="loginMessage"></div>
+
+                    <button type="submit" class="btn btn-success" id="predictBtn" disabled>
+                        <span id="predictBtnText">🔮 Generate Diagnosis</span>
+                    </button>
                 </form>
-                <div class="auth-switch">
-                   Don't have an account? <a onclick="showPage('register')">Register</a>
-                </div>
-                <div class="auth-switch">
-                    Forgot Password? <a onclick="showPage('forgot-password')">Reset Password</a>
-                </div>
+
+                <div id="predictStatus"></div>
+                <div id="results" class="results"></div>
             </div>
         </div>
-
-        <!-- Register Page -->
-        <div id="register-page" class="page">
-            <div class="auth-container">
-                <h2 class="text-2xl font-bold mb-4 text-center">Register</h2>
-                <form class="auth-form" onsubmit="handleRegister(event)">
-                    <div class="form-group">
-                        <label for="registerName">Full Name</label>
-                        <input type="text" id="registerName" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="registerEmail">Email</label>
-                        <input type="email" id="registerEmail" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="registerPassword">Password</label>
-                        <input type="password" id="registerPassword" required minlength="6">
-                    </div>
-                    <div class="form-group">
-                        <label for="confirmPassword">Confirm Password</label>
-                        <input type="password" id="confirmPassword" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="registerClass">Select Class</label>
-                        <select id="registerClass" required>
-                            <option value="8th">8th</option>
-                            <option value="9th">9th</option>
-                            <option value="10th">10th</option>
-                        </select>
-                    </div>
-                    <button type="submit" class="button">Register</button>
-                    <div id="registerMessage"></div>
-                </form>
-                <div class="auth-switch">
-                    Already have an account? <a onclick="showPage('login')">Login</a>
-                </div>
-            </div>
-        </div>
-
-        <!-- Forgot Password Page -->
-        <div id="forgot-password-page" class="page">
-            <div class="auth-container">
-                <h2 class="text-2xl font-bold mb-4 text-center">Forgot Password</h2>
-                <form class="auth-form" onsubmit="handleForgotPassword(event)">
-                    <div class="form-group">
-                        <label for="forgotEmail">Email</label>
-                        <input type="email" id="forgotEmail" required>
-                    </div>
-                    <button type="submit" class="button">Send OTP</button>
-                    <div id="forgotMessage"></div>
-                </form>
-                <div class="auth-switch">
-                    Remember your password? <a onclick="showPage('login')">Login</a>
-                </div>
-            </div>
-        </div>
-
-        <!-- Reset Password Page -->
-        <div id="reset-password-page" class="page">
-            <div class="auth-container">
-                <h2 class="text-2xl font-bold mb-4 text-center">Reset Password</h2>
-                <form class="auth-form" onsubmit="handleResetPassword(event)">
-                    <div class="form-group">
-                        <label for="resetOTP">OTP</label>
-                        <input type="text" id="resetOTP" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="newPassword">New Password</label>
-                        <input type="password" id="newPassword" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="confirmNewPassword">Confirm New Password</label>
-                        <input type="password" id="confirmNewPassword" required>
-                    </div>
-                    <button type="submit" class="button">Reset Password</button>
-                    <div id="resetMessage"></div>
-                </form>
-            </div>
-        </div>
-    </main>
-
-    <!-- Footer Section -->
-    <footer>
-        <div class="footer-links">
-            <a href="#">Terms of Service</a>
-            <a href="#">Privacy Policy</a>
-            <a href="#">FAQs</a>
-        </div>
-        <div class="social-icons">
-            <a href="#"><i class="fab fa-linkedin"></i></a>
-            <a href="#"><i class="fab fa-twitter"></i></a>
-            <a href="#"><i class="fab fa-facebook"></i></a>
-            <a href="#"><i class="fab fa-instagram"></i></a>
-        </div>
-        <div class="copyright">
-            © 2025 TutorTeach.ai. All Rights Reserved.
-        </div>
-    </footer>
-
-    <!-- Live Chat Icon -->
-    <div class="live-chat" onclick="openChat()">
-        <i class="fas fa-comment"></i>
     </div>
 
     <script>
-        // State management
-        let currentClass = null;
-        let currentSubject = null;
-        let currentTopic = null;
-        let contentIndex = 0;
-        let contentComplete = false;
-        let videoComplete = false;
-        let isMobileMenuOpen = false;
-        let users = JSON.parse(localStorage.getItem('users')) || [];
-        let currentUser = JSON.parse(localStorage.getItem('currentUser'));
-        let otp = null;
+        let isSystemTrained = false;
 
-        // Update auth button based on login status
-        function updateAuthButton() {
-            const authButton = document.getElementById('authButton');
-            if (currentUser) {
-                authButton.innerHTML = `<i class="fas fa-user"></i> ${currentUser.displayName || currentUser.name}`;
-            } else {
-                authButton.innerHTML = `<i class="fas fa-user"></i> Login`;
-            }
+        function switchTab(tabName) {
+            // Remove active class from all tabs and contents
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+            // Add active class to clicked tab and corresponding content
+            event.target.classList.add('active');
+            document.getElementById(tabName + '-content').classList.add('active');
         }
 
-        // Show Profile Page
-        function showProfile() {
-            if (!currentUser) {
-                showPage('login');
-                return;
-            }
-            document.getElementById('registeredName').value = currentUser.name;
-            document.getElementById('displayName').value = currentUser.displayName || currentUser.name;
-            document.getElementById('profileEmail').value = currentUser.email;
-            showPage('profile');
-        }
+        async function trainSystem() {
+            const trainBtn = document.getElementById('trainBtn');
+            const trainBtnText = document.getElementById('trainBtnText');
+            const trainStatus = document.getElementById('trainStatus');
+            const trainingProgress = document.getElementById('trainingProgress');
+            const progressFill = document.getElementById('progressFill');
 
-        // Show Dashboard Page
-        function showDashboard() {
-            if (!currentUser) {
-                showPage('login');
-                return;
-            }
-            // Example data for dashboard (you can replace this with actual data)
-            document.getElementById('lessons-completed').textContent = '5';
-            document.getElementById('lessons-ongoing').textContent = '3';
-            document.getElementById('progress-percentage').textContent = '50%';
-            showPage('dashboard');
-        }
+            trainBtn.disabled = true;
+            trainBtnText.innerHTML = '<div class="loading"></div>Training in Progress';
+            trainingProgress.classList.remove('hidden');
 
-        // Handle registration
-        function handleRegister(event) {
-            event.preventDefault();
-            const messageDiv = document.getElementById('registerMessage');
-            const name = document.getElementById('registerName').value;
-            const email = document.getElementById('registerEmail').value;
-            const password = document.getElementById('registerPassword').value;
-            const confirmPassword = document.getElementById('confirmPassword').value;
-            const selectedClass = document.getElementById('registerClass').value;
+            // Simulate progress
+            let progress = 0;
+            const progressInterval = setInterval(() => {
+                progress += Math.random() * 15;
+                if (progress > 95) progress = 95;
+                progressFill.style.width = progress + '%';
+            }, 300);
 
-            if (password !== confirmPassword) {
-                messageDiv.className = 'error-message';
-                messageDiv.textContent = 'Passwords do not match!';
-                return;
-            }
-
-            if (users.some(user => user.email === email)) {
-                messageDiv.className = 'error-message';
-                messageDiv.textContent = 'Email already registered!';
-                return;
-            }
-
-            users.push({ name, email, password, class: selectedClass });
-            localStorage.setItem('users', JSON.stringify(users));
-            
-            messageDiv.className = 'success-message';
-            messageDiv.textContent = 'Registration successful! Redirecting to login...';
-            
-            // Send registration confirmation email
-            sendEmail(email, 'Registration Successful', 'You have successfully registered to TutorTeach.ai.');
-            
-            setTimeout(() => {
-                showPage('login');
-            }, 2000);
-        }
-
-        // Handle login
-        function handleLogin(event) {
-            event.preventDefault();
-            const messageDiv = document.getElementById('loginMessage');
-            const email = document.getElementById('loginEmail').value;
-            const password = document.getElementById('loginPassword').value;
-            const selectedClass = document.getElementById('loginClass').value;
-
-            const user = users.find(u => u.email === email && u.password === password);
-            
-            if (user) {
-                currentUser = user;
-                currentUser.class = selectedClass; // Update user's class
-                localStorage.setItem('currentUser', JSON.stringify(user));
-                updateAuthButton();
-                
-                messageDiv.className = 'success-message';
-                messageDiv.textContent = 'Login successful! Redirecting...';
-                
-                setTimeout(() => {
-                    showPage('learning-path');
-                }, 1000);
-            } else {
-                messageDiv.className = 'error-message';
-                messageDiv.textContent = 'Invalid email or password!';
-            }
-        }
-
-        // Handle logout
-        function logout() {
-            currentUser = null;
-            localStorage.removeItem('currentUser');
-            updateAuthButton();
-            showPage('home');
-        }
-
-        // Handle forgot password
-        function handleForgotPassword(event) {
-            event.preventDefault();
-            const messageDiv = document.getElementById('forgotMessage');
-            const email = document.getElementById('forgotEmail').value;
-
-            const user = users.find(u => u.email === email);
-            
-            if (user) {
-                otp = generateOTP();
-                sendEmail(email, 'Password Reset OTP', `Your OTP for password reset is: ${otp}`);
-                
-                messageDiv.className = 'success-message';
-                messageDiv.textContent = 'OTP sent to your email.';
-                showPage('reset-password');
-            } else {
-                messageDiv.className = 'error-message';
-                messageDiv.textContent = 'Email not found!';
-            }
-        }
-
-        // Handle reset password
-        function handleResetPassword(event) {
-            event.preventDefault();
-            const messageDiv = document.getElementById('resetMessage');
-            const enteredOTP = document.getElementById('resetOTP').value;
-            const newPassword = document.getElementById('newPassword').value;
-            const confirmNewPassword = document.getElementById('confirmNewPassword').value;
-
-            if (enteredOTP !== otp) {
-                messageDiv.className = 'error-message';
-                messageDiv.textContent = 'Invalid OTP!';
-                return;
-            }
-
-            if (newPassword !== confirmNewPassword) {
-                messageDiv.className = 'error-message';
-                messageDiv.textContent = 'Passwords do not match!';
-                return;
-            }
-
-            const user = users.find(u => u.email === document.getElementById('forgotEmail').value);
-            user.password = newPassword;
-            localStorage.setItem('users', JSON.stringify(users));
-            
-            messageDiv.className = 'success-message';
-            messageDiv.textContent = 'Password reset successful! Redirecting to login...';
-            
-            setTimeout(() => {
-                showPage('login');
-            }, 2000);
-        }
-
-        // Generate OTP
-        function generateOTP() {
-            return Math.floor(100000 + Math.random() * 900000).toString();
-        }
-
-        // Send email
-        function sendEmail(to, subject, body) {
-            const msg = Message(subject, recipients=[to], body=body);
-            mail.send(msg);
-        }
-
-        // Initialize the learning path
-        function initLearningPath() {
-            renderClasses();
-            updateBreadcrumb();
-        }
-
-        // Render class selection
-        function renderClasses() {
-            fetch('/api/classes')
-                .then(response => response.json())
-                .then(data => {
-                    const container = document.getElementById('class-selection');
-                    container.innerHTML = Object.keys(data.classes).map(className => `
-                        <div class="card ${currentUser && currentUser.class !== className ? 'blurred' : ''}" onclick="selectClass('${className}')">
-                            <h2 class="card-title">Class ${className}</h2>
-                            <p class="card-content">Explore subjects and topics for Class ${className}</p>
-                        </div>
-                    `).join('');
-                });
-        }
-
-        // Select a class
-        function selectClass(className) {
-            if (currentUser && currentUser.class !== className) {
-                alert('You can only access your registered class.');
-                return;
-            }
-            currentClass = className;
-            fetch(`/api/subjects/${className}`)
-                .then(response => response.json())
-                .then(data => {
-                    const container = document.getElementById('subject-selection');
-                    container.innerHTML = Object.keys(data.subjects).map(subject => `
-                        <div class="card" onclick="selectSubject('${subject}')">
-                            <h2 class="card-title">${subject}</h2>
-                            <p class="card-content">Explore topics in ${subject}</p>
-                        </div>
-                    `).join('');
-                    
-                    showSection('subject-selection');
-                    updateBreadcrumb();
-                });
-        }
-
-        // Select a subject
-        function selectSubject(subject) {
-            if (!currentUser) {
-                showPage('login');
-                return;
-            }
-            currentSubject = subject;
-            fetch(`/api/topics/${currentClass}/${subject}`)
-                .then(response => response.json())
-                .then(data => {
-                    const container = document.getElementById('topic-selection');
-                    container.innerHTML = data.topics.map(topic => `
-                        <div class="card" onclick="selectTopic('${topic}')">
-                            <h2 class="card-title">${topic}</h2>
-                            <p class="card-content">Learn about ${topic}</p>
-                        </div>
-                    `).join('');
-                    
-                    showSection('topic-selection');
-                    updateBreadcrumb();
-                });
-        }
-
-        // Select a topic
-        function selectTopic(topic) {
-            currentTopic = topic;
-            fetch(`/api/content/${topic}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.content) {
-                        document.getElementById('topic-selection').classList.add('hidden');
-                        document.getElementById('content-section').classList.remove('hidden');
-                        displayContentWordByWord(data.content);
-                    } else {
-                        alert('No content available for this topic.');
+            try {
+                const response = await fetch('/train', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
                     }
                 });
-            updateBreadcrumb();
-        }
 
-        // Display content word by word
-        function displayContentWordByWord(content) {
-            const contentContainer = document.getElementById('content-display');
-            contentContainer.innerHTML = '';
-            const words = content.split(' ');
-            let index = 0;
-            
-            const interval = setInterval(() => {
-                if (index >= words.length) {
-                    clearInterval(interval);
-                    document.getElementById('mark-complete-button').disabled = false;
-                    return;
+                const data = await response.json();
+                clearInterval(progressInterval);
+                progressFill.style.width = '100%';
+
+                if (data.success) {
+                    trainStatus.innerHTML = `<div class="status success">${data.message}</div>`;
+
+                    // Update system status
+                    isSystemTrained = true;
+                    document.getElementById('statusIndicator').classList.add('trained');
+                    document.getElementById('statusText').textContent = 'System Ready';
+                    document.getElementById('predictBtn').disabled = false;
+
+                    // Show accuracy
+                    document.getElementById('accuracyDisplay').classList.remove('hidden');
+                    document.getElementById('accuracyValue').textContent = data.accuracy + '%';
+
+                    // Show rules
+                    if (data.rules && data.rules.length > 0) {
+                        document.getElementById('rulesSection').classList.remove('hidden');
+                        const rulesList = document.getElementById('rulesList');
+                        rulesList.innerHTML = data.rules.map(rule =>
+                            `<div class="rule-item">${rule}</div>`
+                        ).join('');
+                    }
+
+                    trainBtnText.textContent = '✅ System Trained';
+                    trainBtn.classList.add('btn-success');
+                } else {
+                    trainStatus.innerHTML = `<div class="status error">Training failed: ${data.message}</div>`;
+                    trainBtn.disabled = false;
+                    trainBtnText.textContent = '🔄 Retry Training';
                 }
-                contentContainer.innerHTML += words[index] + ' ';
-                index++;
-            }, 300); // Changed from 50 to 300 milliseconds
-        }
-        // Mark a topic as complete
-        function markComplete() {
-            contentComplete = true;
-            document.getElementById('content-section').classList.add('hidden');
-            document.getElementById('video-section').classList.remove('hidden');
-            fetch(`/api/video/${currentTopic}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.video_path) {
-                        const videoPlayer = document.getElementById('video-player');
-                        videoPlayer.src = `/videos/${data.video_path}`;
-                        videoPlayer.load();       
-                        videoPlayer.play();
-                        document.getElementById('next-button').disabled = false; // Enable "Next" button
-                    } else {
-                        alert('No video available for this topic.');
-                    }
-                });
-        }
-
-        // Navigate to the next topic
-        function nextTopic() {
-            const topics = education_data['classes'][currentClass]['subjects'][currentSubject]['topics'];
-            const currentIndex = topics.indexOf(currentTopic);
-            if (currentIndex < topics.length - 1) {
-                selectTopic(topics[currentIndex + 1]);
-            } else {
-                alert('No more topics in this subject.');
+            } catch (error) {
+                clearInterval(progressInterval);
+                trainStatus.innerHTML = `<div class="status error">Training failed: ${error.message}</div>`;
+                trainBtn.disabled = false;
+                trainBtnText.textContent = '🔄 Retry Training';
             }
+
+            setTimeout(() => {
+                trainingProgress.classList.add('hidden');
+            }, 1000);
         }
 
-        // Navigate to the previous topic
-        function previousTopic() {
-            const topics = education_data['classes'][currentClass]['subjects'][currentSubject]['topics'];
-            const currentIndex = topics.indexOf(currentTopic);
-            if (currentIndex > 0) {
-                selectTopic(topics[currentIndex - 1]);
-            } else {
-                alert('This is the first topic.');
-            }
-        }
+        document.getElementById('patientForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
 
-        // Show page function
-        function showPage(pageId) {
-            // If trying to access learning path while not logged in
-            if (pageId === 'learning-path' && !currentUser) {
-                showPage('login');
+            if (!isSystemTrained) {
+                document.getElementById('predictStatus').innerHTML =
+                    '<div class="status error">Please train the system first!</div>';
                 return;
             }
 
-            document.querySelectorAll('.page').forEach(page => {
-                page.classList.remove('active');
-            });
-            document.getElementById(pageId + '-page').classList.add('active');
-            
-            if (pageId === 'learning-path') {
-                initLearningPath();
+            const predictBtn = document.getElementById('predictBtn');
+            const predictBtnText = document.getElementById('predictBtnText');
+            const predictStatus = document.getElementById('predictStatus');
+            const results = document.getElementById('results');
+
+            predictBtn.disabled = true;
+            predictBtnText.innerHTML = '<div class="loading"></div>Analyzing...';
+            predictStatus.innerHTML = '<div class="status info">🔍 AI is analyzing patient data...</div>';
+
+            const formData = {
+                age: document.getElementById('age').value,
+                blood_pressure_systolic: document.getElementById('blood_pressure_systolic').value,
+                blood_pressure_diastolic: document.getElementById('blood_pressure_diastolic').value,
+                cholesterol: document.getElementById('cholesterol').value,
+                blood_sugar: document.getElementById('blood_sugar').value,
+                heart_rate: document.getElementById('heart_rate').value,
+                bmi: document.getElementById('bmi').value,
+                exercise_hours_per_week: document.getElementById('exercise_hours_per_week').value,
+                smoking_years: document.getElementById('smoking_years').value,
+                family_history: document.getElementById('family_history').value
+            };
+
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(formData)
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    results.innerHTML = `
+                        <div class="prediction-result">
+                            <div class="diagnosis">Diagnosis: ${data.diagnosis}</div>
+                            <div class="confidence">Confidence: ${data.confidence}%</div>
+                            <div class="explanation">
+                                <h4>🧠 AI Explanation:</h4>
+                                <p>${data.explanation}</p>
+                                <p>${data.recommendations}</p>
+                            </div>
+                        </div>
+                    `;
+                    predictStatus.innerHTML = `<div class="status success">✅ Diagnosis completed successfully</div>`;
+                } else {
+                    predictStatus.innerHTML = `<div class="status error">❌ Diagnosis failed: ${data.message}</div>`;
+                }
+            } catch (error) {
+                predictStatus.innerHTML = `<div class="status error">❌ Network error: ${error.message}</div>`;
             }
-            
-            if (isMobileMenuOpen) {
-                document.querySelector('nav ul').classList.remove('active');
-                isMobileMenuOpen = false;
-            }
-        }
 
-        // Navigation
-        function goBack() {
-            if (currentTopic) {
-                currentTopic = null;
-                showSection('topic-selection');
-            } else if (currentSubject) {
-                currentSubject = null;
-                showSection('subject-selection');
-            } else if (currentClass) {
-                currentClass = null;
-                showSection('class-selection');
-                document.getElementById('navigation').classList.add('hidden');
-            }
-            updateBreadcrumb();
-        }
-
-        // Update breadcrumb
-        function updateBreadcrumb() {
-            const breadcrumb = document.getElementById('breadcrumb');
-            let path = [];
-            if (currentClass) path.push(`Class ${currentClass}`);
-            if (currentSubject) path.push(currentSubject);
-            if (currentTopic) path.push(currentTopic);
-            breadcrumb.textContent = path.join(' → ');
-        }
-
-        // Show/hide sections
-        function showSection(sectionId) {
-            ['class-selection', 'subject-selection', 'topic-selection', 'content-section', 'video-section'].forEach(id => {
-                document.getElementById(id).classList.add('hidden');
-            });
-            document.getElementById(sectionId).classList.remove('hidden');
-            document.getElementById('navigation').classList.remove('hidden');
-        }
-
-        // Initialize auth state and mobile menu
-        updateAuthButton();
-        const menuToggle = document.querySelector('.menu-toggle');
-        menuToggle.addEventListener('click', () => {
-            const navUl = document.querySelector('nav ul');
-            navUl.classList.toggle('active');
-            isMobileMenuOpen = !isMobileMenuOpen;
+            predictBtn.disabled = false;
+            predictBtnText.innerHTML = '🔮 Generate Diagnosis';
         });
 
-        // Initial check for mobile menu
-        if (window.innerWidth <= 768) {
-            menuToggle.style.display = 'block';
-        }
-
-        // Open live chat
-        function openChat() {
-            alert("Live chat feature coming soon!");
-        }
-
-        // Handle contact form submission
-        function handleContactForm(event) {
-            event.preventDefault();
-            const name = document.getElementById('contactName').value;
-            const email = document.getElementById('contactEmail').value;
-            const message = document.getElementById('contactMessage').value;
-
-            // Send email to TutorTeach.ai
-            sendEmail('tutorteach.ai@gmail.com', 'New Contact Form Submission', `
-                Name: ${name}
-                Email: ${email}
-                Message: ${message}
-            `);
-
-            alert("Thank you for contacting us! We will get back to you soon.");
-        }
-
-        // AI Stats Counter Animation
-        function animateStats() {
-            const topicsCovered = document.getElementById('topics-covered');
-            const studentsBenefited = document.getElementById('students-benefited');
-            const satisfactionRate = document.getElementById('satisfaction-rate');
-
-            const stats = [
-                { element: topicsCovered, target: 100, duration: 2000 },
-                { element: studentsBenefited, target: 5000, duration: 2000 },
-                { element: satisfactionRate, target: 95, duration: 2000 }
-            ];
-
-            stats.forEach(stat => {
-                let start = 0;
-                const increment = stat.target / (stat.duration / 10);
-                const interval = setInterval(() => {
-                    start += increment;
-                    stat.element.textContent = Math.floor(start);
-                    if (start >= stat.target) {
-                        clearInterval(interval);
-                        stat.element.textContent = stat.target;
-                    }
-                }, 10);
+        // Tooltip functionality
+        document.querySelectorAll('.tooltip').forEach(element => {
+            element.addEventListener('mouseenter', function() {
+                this.setAttribute('data-tooltip', this.getAttribute('data-tooltip'));
             });
-        }
+        });
 
-        // Initialize AI Stats Animation
-        animateStats();
-
-        // Start Journey Button
-        function startJourney() {
-            if (!currentUser) {
-                showPage('login');
-            } else {
-                showPage('learning-path');
-            }
-        }
+        // Initialize tabs
+        document.querySelectorAll('.tab-content').forEach((content, index) => {
+            if (index > 0) content.classList.remove('active');
+        });
     </script>
 </body>
-</html>
-'''
+</html>'''
+class NeuroSymbolicEvolutionarySystem:
+    """Main system combining neural networks with evolutionary symbolic rules"""
 
-# Flask routes
+    def __init__(self):
+        self.neural_model = None
+        self.symbolic_rules = []
+        self.feature_names = []
+        self.scaler = StandardScaler()
+        self.conditions = ['Healthy', 'Diabetes', 'Heart Disease', 'Hypertension']
+        self.is_trained = False
+
+        # Setup DEAP for evolutionary algorithm
+        if not hasattr(creator, "FitnessMax"):
+            creator.create("FitnessMax", base.Fitness, weights=(1.0,))
+        if not hasattr(creator, "Individual"):
+            creator.create("Individual", list, fitness=creator.FitnessMax)
+
+        self.toolbox = base.Toolbox()
+
+    def prepare_data(self, df):
+        """Prepare dataset for training"""
+        X = df.drop('diagnosis', axis=1)
+        y = df['diagnosis']
+        self.feature_names = X.columns.tolist()
+
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
+
+        # Scale features
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
+
+        return X_train_scaled, X_test_scaled, y_train, y_test, X_train, X_test
+
+    def train_neural_model(self, X_train, y_train):
+        """Train neural network component"""
+        print("Training Neural Network...")
+        self.neural_model = MLPClassifier(
+            hidden_layer_sizes=(100, 50),
+            max_iter=500,
+            random_state=42,
+            early_stopping=True,
+            validation_fraction=0.1
+        )
+        self.neural_model.fit(X_train, y_train)
+        print(f"Neural Network Training Complete. Iterations: {self.neural_model.n_iter_}")
+
+    def create_individual(self):
+        """Create a random symbolic rule (individual for evolution)"""
+        feature = random.choice(self.feature_names)
+        operator = random.choice(['>', '<', '>=', '<='])
+
+        # Set reasonable thresholds based on feature
+        if feature == 'age':
+            threshold = random.uniform(20, 80)
+        elif 'blood_pressure' in feature:
+            threshold = random.uniform(80, 180)
+        elif feature == 'cholesterol':
+            threshold = random.uniform(150, 300)
+        elif feature == 'blood_sugar':
+            threshold = random.uniform(70, 200)
+        elif feature == 'heart_rate':
+            threshold = random.uniform(50, 120)
+        elif feature == 'bmi':
+            threshold = random.uniform(18, 40)
+        elif feature == 'exercise_hours_per_week':
+            threshold = random.uniform(0, 8)
+        elif feature == 'smoking_years':
+            threshold = random.uniform(0, 30)
+        else:  # family_history
+            threshold = 0.5
+
+        prediction = random.randint(0, 3)
+        confidence = random.uniform(0.5, 1.0)
+
+        return [feature, operator, threshold, prediction, confidence]
+
+    def evaluate_rule(self, individual, X_data, y_true):
+        """Evaluate fitness of a symbolic rule"""
+        feature, operator, threshold, prediction, confidence = individual
+
+        correct_predictions = 0
+        total_applicable = 0
+
+        for idx, (i, row) in enumerate(X_data.iterrows()):
+            patient_data = row.to_dict()
+            rule = SymbolicRule(feature, operator, threshold, prediction, confidence)
+            applies, pred, conf = rule.evaluate(patient_data)
+
+            if applies:
+                total_applicable += 1
+                if pred == y_true.iloc[idx]:
+                    correct_predictions += 1
+
+        if total_applicable == 0:
+            return (0.0,)  # Rule doesn't apply to any cases
+
+        accuracy = correct_predictions / total_applicable
+        coverage = total_applicable / len(X_data)
+
+        # Fitness combines accuracy and coverage
+        fitness = accuracy * 0.7 + coverage * 0.3
+        return (fitness,)
+
+    def evolve_symbolic_rules(self, X_train_raw, y_train, generations=15):
+        """Evolve symbolic rules using genetic algorithm"""
+        print("Evolving Symbolic Rules...")
+
+        # Setup toolbox
+        self.toolbox.register("individual", tools.initIterate, creator.Individual, self.create_individual)
+        self.toolbox.register("population", tools.initRepeat, list, self.toolbox.individual)
+        self.toolbox.register("evaluate", self.evaluate_rule, X_data=X_train_raw, y_true=y_train)
+        self.toolbox.register("mate", self.crossover_rules)
+        self.toolbox.register("mutate", self.mutate_rule)
+        self.toolbox.register("select", tools.selTournament, tournsize=3)
+
+        # Create initial population
+        population = self.toolbox.population(n=50)
+
+        # Evaluate initial population
+        fitnesses = list(map(self.toolbox.evaluate, population))
+        for ind, fit in zip(population, fitnesses):
+            ind.fitness.values = fit
+
+        # Evolution loop
+        for gen in range(generations):
+            # Select next generation
+            offspring = self.toolbox.select(population, len(population))
+            offspring = list(map(self.toolbox.clone, offspring))
+
+            # Crossover and mutation
+            for child1, child2 in zip(offspring[::2], offspring[1::2]):
+                if random.random() < 0.5:
+                    self.toolbox.mate(child1, child2)
+                    del child1.fitness.values
+                    del child2.fitness.values
+
+            for mutant in offspring:
+                if random.random() < 0.2:
+                    self.toolbox.mutate(mutant)
+                    del mutant.fitness.values
+
+            # Evaluate offspring
+            invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
+            fitnesses = map(self.toolbox.evaluate, invalid_ind)
+            for ind, fit in zip(invalid_ind, fitnesses):
+                ind.fitness.values = fit
+
+            population[:] = offspring
+
+        # Extract best rules
+        best_individuals = tools.selBest(population, k=10)
+        self.symbolic_rules = []
+
+        for ind in best_individuals:
+            feature, operator, threshold, prediction, confidence = ind
+            rule = SymbolicRule(feature, operator, threshold, prediction, confidence)
+            self.symbolic_rules.append(rule)
+
+        print(f"Evolution Complete. Generated {len(self.symbolic_rules)} rules.")
+
+    def crossover_rules(self, ind1, ind2):
+        """Crossover operation for symbolic rules"""
+        # Swap random components
+        if random.random() < 0.5:
+            ind1[0], ind2[0] = ind2[0], ind1[0]  # feature
+        if random.random() < 0.5:
+            ind1[1], ind2[1] = ind2[1], ind1[1]  # operator
+        if random.random() < 0.5:
+            ind1[2], ind2[2] = ind2[2], ind1[2]  # threshold
+        if random.random() < 0.5:
+            ind1[3], ind2[3] = ind2[3], ind1[3]  # prediction
+
+        return ind1, ind2
+
+    def mutate_rule(self, individual):
+        """Mutation operation for symbolic rules"""
+        mutation_type = random.randint(0, 4)
+
+        if mutation_type == 0:  # Mutate feature
+            individual[0] = random.choice(self.feature_names)
+        elif mutation_type == 1:  # Mutate operator
+            individual[1] = random.choice(['>', '<', '>=', '<='])
+        elif mutation_type == 2:  # Mutate threshold
+            individual[2] += random.gauss(0, individual[2] * 0.1)
+        elif mutation_type == 3:  # Mutate prediction
+            individual[3] = random.randint(0, 3)
+        else:  # Mutate confidence
+            individual[4] = max(0.1, min(1.0, individual[4] + random.gauss(0, 0.1)))
+
+        return (individual,)
+
+    def hybrid_predict(self, X_test_scaled, X_test_raw):
+        """Make predictions using hybrid neuro-symbolic approach"""
+        neural_preds = self.neural_model.predict_proba(X_test_scaled)
+        hybrid_preds = []
+        explanations = []
+
+        for i, (neural_prob, row) in enumerate(zip(neural_preds, X_test_raw.iterrows())):
+            patient_data = row[1].to_dict()
+
+            # Check if any symbolic rule applies
+            applicable_rules = []
+            for rule in self.symbolic_rules:
+                applies, pred, conf = rule.evaluate(patient_data)
+                if applies:
+                    applicable_rules.append((rule, pred, conf))
+
+            if applicable_rules:
+                # Use symbolic rule with highest confidence
+                best_rule, symbolic_pred, confidence = max(applicable_rules, key=lambda x: x[2])
+
+                # Combine neural and symbolic predictions
+                neural_pred = np.argmax(neural_prob)
+                neural_confidence = np.max(neural_prob)
+
+                # Weighted combination
+                if confidence > neural_confidence:
+                    final_pred = symbolic_pred
+                    explanation = f"Symbolic Rule: {best_rule}"
+                else:
+                    final_pred = neural_pred
+                    explanation = f"Neural Network (conf: {neural_confidence:.3f})"
+            else:
+                # Use neural network prediction
+                final_pred = np.argmax(neural_prob)
+                explanation = f"Neural Network (conf: {np.max(neural_prob):.3f})"
+
+            hybrid_preds.append(final_pred)
+            explanations.append(explanation)
+
+        return np.array(hybrid_preds), explanations
+
+    def predict_single_patient(self, patient_data):
+        """Make prediction for a single patient"""
+        if not self.is_trained:
+            return None, "System not trained yet"
+
+        # Convert to DataFrame for scaling
+        df = pd.DataFrame([patient_data])
+        df_scaled = self.scaler.transform(df)
+
+        # Get neural network prediction
+        neural_prob = self.neural_model.predict_proba(df_scaled)[0]
+
+        # Check symbolic rules
+        applicable_rules = []
+        for rule in self.symbolic_rules:
+            applies, pred, conf = rule.evaluate(patient_data)
+            if applies:
+                applicable_rules.append((rule, pred, conf))
+
+        if applicable_rules:
+            # Use symbolic rule with highest confidence
+            best_rule, symbolic_pred, confidence = max(applicable_rules, key=lambda x: x[2])
+
+            # Combine neural and symbolic predictions
+            neural_pred = np.argmax(neural_prob)
+            neural_confidence = np.max(neural_prob)
+
+            # Weighted combination
+            if confidence > neural_confidence:
+                final_pred = symbolic_pred
+                explanation = f"Symbolic Rule: {best_rule}"
+            else:
+                final_pred = neural_pred
+                explanation = f"Neural Network (conf: {neural_confidence:.3f})"
+        else:
+            # Use neural network prediction
+            final_pred = np.argmax(neural_prob)
+            explanation = f"Neural Network (conf: {np.max(neural_prob):.3f})"
+
+        return final_pred, explanation
+
+# Global system instance
+system = NeuroSymbolicEvolutionarySystem()
+
 @app.route('/')
-def home():
+def index():
     return render_template_string(HTML_TEMPLATE)
 
-@app.route('/api/classes')
-def get_classes():
-    return jsonify({"classes": education_data['classes']})
+@app.route('/train', methods=['POST'])
+def train_system():
+    try:
+        # Generate dataset
+        dataset_gen = MedicalDatasetGenerator(n_samples=800)  # Reduced for faster training
+        df = dataset_gen.generate_dataset()
 
-@app.route('/api/subjects/<class_name>')
-def get_subjects(class_name):
-    if class_name not in education_data['classes']:
-        return jsonify({"error": "Class not found"}), 404
-    return jsonify({"subjects": education_data['classes'][class_name]['subjects']})
+        # Prepare data
+        X_train_scaled, X_test_scaled, y_train, y_test, X_train_raw, X_test_raw = system.prepare_data(df)
 
-@app.route('/api/topics/<class_name>/<subject>')
-def get_topics(class_name, subject):
-    if class_name not in education_data['classes'] or \
-       subject not in education_data['classes'][class_name]['subjects']:
-        return jsonify({"error": "Invalid class or subject"}), 404
-    return jsonify({"topics": education_data['classes'][class_name]['subjects'][subject]['topics']})
+        # Train neural component
+        system.train_neural_model(X_train_scaled, y_train)
 
-@app.route('/api/content/<topic>')
-def get_content(topic):
-    if topic not in content_db:
-        return jsonify({"content": None})
-    return jsonify({"content": content_db[topic][0]})  # Return the first content item for simplicity
+        # Evolve symbolic rules
+        system.evolve_symbolic_rules(X_train_raw, y_train, generations=10)  # Reduced generations
 
-@app.route('/api/video/<topic>')
-def get_video(topic):
-    video_path = f"{topic.lower().replace(' ', '_')}.mp4"
-    if os.path.exists(os.path.join(app.config['UPLOAD_FOLDER'], video_path)):
-        return jsonify({"video_path": video_path})
-    return jsonify({"video_path": None})
+        # Mark as trained
+        system.is_trained = True
 
-@app.route('/videos/<path:filename>')
-def serve_video(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+        # Get accuracy
+        hybrid_preds, explanations = system.hybrid_predict(X_test_scaled, X_test_raw)
+        accuracy = accuracy_score(y_test, hybrid_preds)
 
-@app.errorhandler(404)
-def not_found_error(error):
-    return jsonify({"error": "Resource not found"}), 404
+        # Get rules for display
+        rules = [str(rule) for rule in system.symbolic_rules[:5]]  # Show top 5 rules
 
-@app.errorhandler(500) 
-def internal_error(error):
-    return jsonify({"error": "Internal server error"}), 500
+        return jsonify({
+            'success': True,
+            'accuracy': round(accuracy * 100, 2),
+            'rules': rules,
+            'message': 'System trained successfully!'
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Training failed: {str(e)}'
+        })
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    try:
+        if not system.is_trained:
+            return jsonify({
+                'success': False,
+                'message': 'System not trained yet. Please train the system first.'
+            })
+
+        data = request.json
+
+        # Extract patient data
+        patient_data = {
+            'age': float(data['age']),
+            'blood_pressure_systolic': float(data['blood_pressure_systolic']),
+            'blood_pressure_diastolic': float(data['blood_pressure_diastolic']),
+            'cholesterol': float(data['cholesterol']),
+            'blood_sugar': float(data['blood_sugar']),
+            'heart_rate': float(data['heart_rate']),
+            'bmi': float(data['bmi']),
+            'exercise_hours_per_week': float(data['exercise_hours_per_week']),
+            'smoking_years': float(data['smoking_years']),
+            'family_history': float(data['family_history'])
+        }
+
+        # Make prediction
+        prediction, explanation = system.predict_single_patient(patient_data)
+
+        if prediction is None:
+            return jsonify({
+                'success': False,
+                'message': explanation
+            })
+
+        diagnosis = system.conditions[prediction]
+
+        return jsonify({
+            'success': True,
+            'diagnosis': diagnosis,
+            'explanation': explanation,
+            'prediction_code': int(prediction)
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Prediction failed: {str(e)}'
+        })
+
+@app.route('/get_rules')
+def get_rules():
+    if not system.is_trained:
+        return jsonify({
+            'success': False,
+            'message': 'System not trained yet.'
+        })
+
+    rules = [str(rule) for rule in system.symbolic_rules]
+    return jsonify({
+        'success': True,
+        'rules': rules
+    })
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True)
