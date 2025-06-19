@@ -1,1431 +1,9344 @@
-from flask import Flask, render_template, request, jsonify,render_template_string
-import numpy as np
-import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.neural_network import MLPClassifier
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-import random
-from deap import base, creator, tools, algorithms
-import matplotlib
-matplotlib.use('Agg')  # Use non-interactive backend
-import matplotlib.pyplot as plt
-import seaborn as sns
-from dataclasses import dataclass
-from typing import List, Dict, Tuple, Any
-import warnings
-import io
-import base64
-import json
-warnings.filterwarnings('ignore')
-
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session,send_file,abort,render_template_string
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from flask_mail import Mail, Message
+from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
+from datetime import datetime, timedelta
+import os
+import jwt
+from werkzeug.utils import secure_filename
+import os
+from flask_mail import Mail, Message
+import uuid
 app = Flask(__name__)
-
-# Set random seeds for reproducibility
-np.random.seed(42)
-random.seed(42)
-
-@dataclass
-class SymbolicRule:
-    """Represents a symbolic IF-THEN rule for medical diagnosis"""
-    feature: str
-    operator: str  # '>', '<', '>=', '<=', '=='
-    threshold: float
-    prediction: int
-    confidence: float
-
-    def evaluate(self, patient_data: Dict[str, float]) -> Tuple[bool, int, float]:
-        """Evaluate rule against patient data"""
-        feature_value = patient_data.get(self.feature, 0)
-
-        if self.operator == '>':
-            applies = feature_value > self.threshold
-        elif self.operator == '<':
-            applies = feature_value < self.threshold
-        elif self.operator == '>=':
-            applies = feature_value >= self.threshold
-        elif self.operator == '<=':
-            applies = feature_value <= self.threshold
-        else:  # ==
-            applies = abs(feature_value - self.threshold) < 0.1
-
-        return applies, self.prediction, self.confidence
-
-    def __str__(self):
-        return f"IF {self.feature} {self.operator} {self.threshold:.2f} THEN diagnosis={self.prediction} (conf={self.confidence:.2f})"
-
-class MedicalDatasetGenerator:
-    """Generate synthetic medical dataset with realistic patterns"""
-
-    def __init__(self, n_samples=1000):
-        self.n_samples = n_samples
-        self.feature_names = [
-            'age', 'blood_pressure_systolic', 'blood_pressure_diastolic',
-            'cholesterol', 'blood_sugar', 'heart_rate', 'bmi',
-            'exercise_hours_per_week', 'smoking_years', 'family_history'
-        ]
-        self.conditions = ['Healthy', 'Diabetes', 'Heart Disease', 'Hypertension']
-
-    def generate_dataset(self):
-        """Generate realistic medical dataset"""
-        data = []
-        labels = []
-
-        for _ in range(self.n_samples):
-            # Base patient profile
-            age = np.random.normal(45, 15)
-            age = max(18, min(90, age))
-
-            # Generate correlated features
-            # Healthy patients (25%)
-            if np.random.random() < 0.25:
-                bp_sys = np.random.normal(120, 10)
-                bp_dia = np.random.normal(80, 8)
-                cholesterol = np.random.normal(180, 20)
-                blood_sugar = np.random.normal(90, 10)
-                heart_rate = np.random.normal(70, 10)
-                bmi = np.random.normal(22, 3)
-                exercise = np.random.normal(4, 2)
-                smoking = 0 if np.random.random() > 0.2 else np.random.normal(2, 3)
-                family_hist = 1 if np.random.random() < 0.3 else 0
-                label = 0  # Healthy
-
-            # Diabetes patients (25%)
-            elif np.random.random() < 0.33:
-                bp_sys = np.random.normal(140, 15)
-                bp_dia = np.random.normal(90, 10)
-                cholesterol = np.random.normal(220, 30)
-                blood_sugar = np.random.normal(160, 40)  # High blood sugar
-                heart_rate = np.random.normal(75, 12)
-                bmi = np.random.normal(28, 4)  # Higher BMI
-                exercise = np.random.normal(2, 1.5)  # Less exercise
-                smoking = np.random.normal(8, 5) if np.random.random() > 0.4 else 0
-                family_hist = 1 if np.random.random() < 0.6 else 0  # Higher family history
-                label = 1  # Diabetes
-
-            # Heart Disease patients (25%)
-            elif np.random.random() < 0.5:
-                bp_sys = np.random.normal(150, 20)
-                bp_dia = np.random.normal(95, 12)
-                cholesterol = np.random.normal(240, 35)  # High cholesterol
-                blood_sugar = np.random.normal(100, 15)
-                heart_rate = np.random.normal(80, 15)
-                bmi = np.random.normal(27, 4)
-                exercise = np.random.normal(1.5, 1)  # Low exercise
-                smoking = np.random.normal(12, 6) if np.random.random() > 0.3 else 0
-                family_hist = 1 if np.random.random() < 0.7 else 0
-                label = 2  # Heart Disease
-
-            # Hypertension patients (25%)
-            else:
-                bp_sys = np.random.normal(160, 20)  # High BP
-                bp_dia = np.random.normal(100, 15)  # High BP
-                cholesterol = np.random.normal(200, 25)
-                blood_sugar = np.random.normal(95, 12)
-                heart_rate = np.random.normal(75, 12)
-                bmi = np.random.normal(26, 4)
-                exercise = np.random.normal(2.5, 1.5)
-                smoking = np.random.normal(6, 4) if np.random.random() > 0.5 else 0
-                family_hist = 1 if np.random.random() < 0.5 else 0
-                label = 3  # Hypertension
-
-            # Ensure realistic bounds
-            patient = [
-                max(18, min(90, age)),
-                max(80, min(200, bp_sys)),
-                max(50, min(120, bp_dia)),
-                max(120, min(350, cholesterol)),
-                max(60, min(300, blood_sugar)),
-                max(50, min(120, heart_rate)),
-                max(15, min(45, bmi)),
-                max(0, min(10, exercise)),
-                max(0, smoking),  # Can be 0
-                family_hist
-            ]
-
-            data.append(patient)
-            labels.append(label)
-
-        df = pd.DataFrame(data, columns=self.feature_names)
-        df['diagnosis'] = labels
-        return df
-HTML_TEMPLATE='''<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neuro-Symbolic Medical Diagnosis System</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-            animation: backgroundShift 10s ease-in-out infinite alternate;
-        }
-
-        @keyframes backgroundShift {
-            0% { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-            100% { background: linear-gradient(135deg, #764ba2 0%, #667eea 100%); }
-        }
-
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            background: rgba(255, 255, 255, 0.98);
-            border-radius: 24px;
-            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
-            overflow: hidden;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .header {
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #3498db 100%);
-            color: white;
-            padding: 40px 30px;
-            text-align: center;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .header::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="20" cy="20" r="2" fill="rgba(255,255,255,0.1)"><animate attributeName="opacity" values="0;1;0" dur="3s" repeatCount="indefinite"/></circle><circle cx="80" cy="30" r="1.5" fill="rgba(255,255,255,0.1)"><animate attributeName="opacity" values="0;1;0" dur="2s" repeatCount="indefinite" begin="1s"/></circle><circle cx="40" cy="70" r="1" fill="rgba(255,255,255,0.1)"><animate attributeName="opacity" values="0;1;0" dur="4s" repeatCount="indefinite" begin="2s"/></circle></svg>');
-            pointer-events: none;
-        }
-
-        .header h1 {
-            font-size: 3em;
-            margin-bottom: 15px;
-            text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.3);
-            font-weight: 700;
-            letter-spacing: -1px;
-            position: relative;
-            z-index: 1;
-        }
-
-        .header p {
-            font-size: 1.3em;
-            opacity: 0.95;
-            font-weight: 300;
-            position: relative;
-            z-index: 1;
-        }
-
-        .system-status {
-            display: inline-flex;
-            align-items: center;
-            background: rgba(255, 255, 255, 0.2);
-            padding: 10px 20px;
-            border-radius: 25px;
-            margin-top: 20px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-        }
-
-        .status-indicator {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: #e74c3c;
-            margin-right: 10px;
-            animation: pulse 2s infinite;
-        }
-
-        .status-indicator.trained {
-            background: #27ae60;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        .main-content {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 40px;
-            padding: 40px;
-        }
-
-        .section {
-            background: white;
-            border-radius: 20px;
-            padding: 30px;
-            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.08);
-            border: 1px solid rgba(0, 0, 0, 0.05);
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .section::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: linear-gradient(90deg, #3498db, #2ecc71, #f39c12, #e74c3c);
-            background-size: 300% 100%;
-            animation: gradientShift 3s ease-in-out infinite;
-        }
-
-        @keyframes gradientShift {
-            0%, 100% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-        }
-
-        .section:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.12);
-        }
-
-        .section h2 {
-            color: #2c3e50;
-            margin-bottom: 25px;
-            font-size: 1.8em;
-            font-weight: 600;
-            position: relative;
-            padding-bottom: 15px;
-        }
-
-        .section h2::after {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 50px;
-            height: 3px;
-            background: linear-gradient(90deg, #3498db, #2ecc71);
-            border-radius: 2px;
-        }
-
-        .train-section {
-            text-align: center;
-        }
-
-        .btn {
-            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
-            color: white;
-            border: none;
-            padding: 18px 36px;
-            border-radius: 50px;
-            font-size: 1.1em;
-            cursor: pointer;
-            transition: all 0.4s ease;
-            text-transform: uppercase;
-            font-weight: 600;
-            letter-spacing: 1px;
-            position: relative;
-            overflow: hidden;
-            min-width: 200px;
-        }
-
-        .btn::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-            transition: left 0.5s;
-        }
-
-        .btn:hover::before {
-            left: 100%;
-        }
-
-        .btn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 15px 25px rgba(52, 152, 219, 0.4);
-        }
-
-        .btn:active {
-            transform: translateY(-1px);
-        }
-
-        .btn:disabled {
-            background: linear-gradient(135deg, #bdc3c7, #95a5a6);
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        .btn-success {
-            background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
-        }
-
-        .btn-success:hover {
-            box-shadow: 0 15px 25px rgba(39, 174, 96, 0.4);
-        }
-
-        .form-group {
-            margin-bottom: 25px;
-            position: relative;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            color: #2c3e50;
-            font-weight: 600;
-            font-size: 0.95em;
-            transition: color 0.3s ease;
-        }
-
-        .form-group input, .form-group select {
-            width: 100%;
-            padding: 15px 18px;
-            border: 2px solid #ecf0f1;
-            border-radius: 12px;
-            font-size: 1em;
-            transition: all 0.3s ease;
-            background: #fafbfc;
-        }
-
-        .form-group input:focus, .form-group select:focus {
-            outline: none;
-            border-color: #3498db;
-            background: white;
-            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
-            transform: translateY(-1px);
-        }
-
-        .form-group input:focus + .form-group label,
-        .form-group select:focus + .form-group label {
-            color: #3498db;
-        }
-
-        .feature-info {
-            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 20px;
-            border: 1px solid #dee2e6;
-        }
-
-        .feature-info h3 {
-            color: #495057;
-            margin-bottom: 10px;
-            font-size: 1.1em;
-        }
-
-        .feature-info p {
-            color: #6c757d;
-            font-size: 0.9em;
-            line-height: 1.4;
-        }
-
-        .status {
-            margin: 25px 0;
-            padding: 18px;
-            border-radius: 12px;
-            text-align: center;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .status::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 2px;
-            background: currentColor;
-            animation: statusSlide 1.5s ease-in-out;
-        }
-
-        @keyframes statusSlide {
-            0% { left: -100%; }
-            100% { left: 100%; }
-        }
-
-        .status.success {
-            background: linear-gradient(135deg, #d5edda 0%, #c3e6cb 100%);
-            color: #155724;
-            border: 2px solid #c3e6cb;
-        }
-
-        .status.error {
-            background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
-            color: #721c24;
-            border: 2px solid #f5c6cb;
-        }
-
-        .status.info {
-            background: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%);
-            color: #0c5460;
-            border: 2px solid #bee5eb;
-        }
-
-        .loading {
-            display: inline-block;
-            width: 24px;
-            height: 24px;
-            border: 3px solid rgba(255, 255, 255, 0.3);
-            border-top: 3px solid currentColor;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-right: 12px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .results {
-            margin-top: 25px;
-        }
-
-        .prediction-result {
-            background: linear-gradient(135deg, #e8f8f5 0%, #d5f4e6 100%);
-            border: 3px solid #27ae60;
-            border-radius: 16px;
-            padding: 25px;
-            margin: 20px 0;
-            position: relative;
-            overflow: hidden;
-            animation: slideIn 0.5s ease-out;
-        }
-
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .prediction-result::before {
-            content: '🏥';
-            position: absolute;
-            top: 15px;
-            right: 20px;
-            font-size: 2em;
-            opacity: 0.3;
-        }
-
-        .diagnosis {
-            font-size: 1.5em;
-            font-weight: 700;
-            color: #27ae60;
-            margin-bottom: 15px;
-            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.1);
-        }
-
-        .explanation {
-            color: #2c3e50;
-            font-style: italic;
-            line-height: 1.6;
-            background: rgba(255, 255, 255, 0.7);
-            padding: 15px;
-            border-radius: 10px;
-            border-left: 4px solid #3498db;
-        }
-
-        .rules-list {
-            max-height: 400px;
-            overflow-y: auto;
-            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-            border-radius: 12px;
-            padding: 20px;
-            border: 1px solid #dee2e6;
-        }
-
-        .rules-list::-webkit-scrollbar {
-            width: 8px;
-        }
-
-        .rules-list::-webkit-scrollbar-track {
-            background: #f1f1f1;
-            border-radius: 4px;
-        }
-
-        .rules-list::-webkit-scrollbar-thumb {
-            background: #3498db;
-            border-radius: 4px;
-        }
-
-        .rule-item {
-            background: white;
-            margin: 12px 0;
-            padding: 16px;
-            border-radius: 10px;
-            border-left: 5px solid #3498db;
-            font-family: 'JetBrains Mono', 'Courier New', monospace;
-            font-size: 0.9em;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-
-        .rule-item:hover {
-            transform: translateX(5px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-        }
-
-        .accuracy-display {
-            background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
-            border: 3px solid #f0ad4e;
-            border-radius: 16px;
-            padding: 20px;
-            text-align: center;
-            margin: 20px 0;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .accuracy-display::before {
-            content: '📊';
-            position: absolute;
-            top: 15px;
-            right: 20px;
-            font-size: 2em;
-            opacity: 0.3;
-        }
-
-        .accuracy-display .accuracy-value {
-            font-size: 2.5em;
-            font-weight: 800;
-            color: #e67e22;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
-        }
-
-        .accuracy-label {
-            font-size: 1.1em;
-            color: #d68910;
-            font-weight: 600;
-            margin-top: 5px;
-        }
-
-        .form-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-        }
-
-        .hidden {
-            display: none;
-        }
-
-        .tabs {
-            display: flex;
-            margin-bottom: 20px;
-            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-            border-radius: 12px;
-            padding: 5px;
-            border: 1px solid #dee2e6;
-        }
-
-        .tab {
-            flex: 1;
-            padding: 12px 20px;
-            text-align: center;
-            background: transparent;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            font-weight: 600;
-            color: #6c757d;
-        }
-
-        .tab.active {
-            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
-            color: white;
-            box-shadow: 0 2px 8px rgba(52, 152, 219, 0.3);
-        }
-
-        .tab-content {
-            display: none;
-        }
-
-        .tab-content.active {
-            display: block;
-            animation: fadeIn 0.3s ease-in;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .progress-bar {
-            width: 100%;
-            height: 6px;
-            background: #ecf0f1;
-            border-radius: 3px;
-            overflow: hidden;
-            margin: 15px 0;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #3498db, #2ecc71);
-            width: 0%;
-            transition: width 0.3s ease;
-            border-radius: 3px;
-        }
-
-        @media (max-width: 1024px) {
-            .main-content {
-                grid-template-columns: 1fr;
-                gap: 30px;
-                padding: 30px;
-            }
-        }
-
-        @media (max-width: 768px) {
-            .container {
-                margin: 10px;
-                border-radius: 16px;
-            }
-
-            .main-content {
-                padding: 20px;
-                gap: 20px;
-            }
-
-            .form-row {
-                grid-template-columns: 1fr;
-            }
-
-            .header h1 {
-                font-size: 2.2em;
-            }
-
-            .header p {
-                font-size: 1.1em;
-            }
-
-            .section {
-                padding: 20px;
-            }
-        }
-
-        .tooltip {
-            position: relative;
-        }
-
-        .tooltip::after {
-            content: attr(data-tooltip);
-            position: absolute;
-            bottom: 125%;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #2c3e50;
-            color: white;
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-size: 0.8em;
-            white-space: nowrap;
-            opacity: 0;
-            visibility: hidden;
-            transition: all 0.3s ease;
-            z-index: 1000;
-        }
-
-        .tooltip:hover::after {
-            opacity: 1;
-            visibility: visible;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🧠 Neuro-Symbolic Medical AI</h1>
-            <p>Advanced Hybrid Intelligence for Medical Diagnosis</p>
-            <div class="system-status">
-                <div class="status-indicator" id="statusIndicator"></div>
-                <span id="statusText">System Not Trained</span>
-            </div>
-        </div>
-
-        <div class="main-content">
-            <div class="section train-section">
-                <h2>🚀 System Training</h2>
-                <div class="feature-info">
-                    <h3>Hybrid AI Architecture</h3>
-                    <p>This system combines deep neural networks with evolutionary symbolic reasoning to provide explainable medical diagnoses with high accuracy.</p>
-                </div>
-
-                <button id="trainBtn" class="btn" onclick="trainSystem()">
-                    <span id="trainBtnText">Initialize Training</span>
-                </button>
-
-                <div id="trainingProgress" class="hidden">
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="progressFill"></div>
-                    </div>
-                    <p>Training neural networks and evolving symbolic rules...</p>
-                </div>
-
-                <div id="trainStatus"></div>
-
-                <div id="accuracyDisplay" class="hidden">
-                    <div class="accuracy-display">
-                        <div class="accuracy-value" id="accuracyValue">0%</div>
-                        <div class="accuracy-label">System Accuracy</div>
-                    </div>
-                </div>
-
-                <div id="rulesSection" class="hidden">
-                    <h3>🔍 Discovered Rules</h3>
-                    <div class="rules-list" id="rulesList"></div>
-                </div>
-            </div>
-
-            <div class="section">
-                <h2>🏥 Patient Diagnosis</h2>
-
-                <div class="tabs">
-                    <button class="tab active" onclick="switchTab('basic')">Basic Info</button>
-                    <button class="tab" onclick="switchTab('vitals')">Vitals</button>
-                    <button class="tab" onclick="switchTab('lifestyle')">Lifestyle</button>
-                </div>
-
-                <form id="patientForm">
-                    <div class="tab-content active" id="basic-content">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label class="tooltip" data-tooltip="Patient's age in years">Age (years)</label>
-                                <input type="number" id="age" min="1" max="120" value="45" required>
-                            </div>
-                            <div class="form-group">
-                                <label class="tooltip" data-tooltip="Body Mass Index calculated from height and weight">BMI</label>
-                                <input type="number" id="bmi" step="0.1" min="10" max="50" value="25" required>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label class="tooltip" data-tooltip="Family history of medical conditions (0=No, 1=Yes)">Family History</label>
-                            <select id="family_history" required>
-                                <option value="0">No Family History</option>
-                                <option value="1">Yes, Family History Present</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="tab-content" id="vitals-content">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label class="tooltip" data-tooltip="Systolic blood pressure (top number)">Systolic BP (mmHg)</label>
-                                <input type="number" id="blood_pressure_systolic" min="70" max="250" value="120" required>
-                            </div>
-                            <div class="form-group">
-                                <label class="tooltip" data-tooltip="Diastolic blood pressure (bottom number)">Diastolic BP (mmHg)</label>
-                                <input type="number" id="blood_pressure_diastolic" min="40" max="150" value="80" required>
-                            </div>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label class="tooltip" data-tooltip="Resting heart rate in beats per minute">Heart Rate (bpm)</label>
-                                <input type="number" id="heart_rate" min="40" max="200" value="70" required>
-                            </div>
-                            <div class="form-group">
-                                <label class="tooltip" data-tooltip="Blood sugar level in mg/dL">Blood Sugar (mg/dL)</label>
-                                <input type="number" id="blood_sugar" min="50" max="400" value="90" required>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label class="tooltip" data-tooltip="Total cholesterol level in mg/dL">Cholesterol (mg/dL)</label>
-                            <input type="number" id="cholesterol" min="100" max="400" value="180" required>
-                        </div>
-                    </div>
-
-                    <div class="tab-content" id="lifestyle-content">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label class="tooltip" data-tooltip="Hours of exercise per week">Exercise (hours/week)</label>
-                                <input type="number" id="exercise_hours_per_week" step="0.5" min="0" max="20" value="3" required>
-                            </div>
-                            <div class="form-group">
-                                <label class="tooltip" data-tooltip="Number of years of smoking (0 if never smoked)">Smoking Years</label>
-                                <input type="number" id="smoking_years" min="0" max="70" value="0" required>
-                            </div>
-                        </div>
-                    </div>
-
-                    <button type="submit" class="btn btn-success" id="predictBtn" disabled>
-                        <span id="predictBtnText">🔮 Generate Diagnosis</span>
-                    </button>
-                </form>
-
-                <div id="predictStatus"></div>
-                <div id="results" class="results"></div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        let isSystemTrained = false;
-
-        function switchTab(tabName) {
-            // Remove active class from all tabs and contents
-            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-
-            // Add active class to clicked tab and corresponding content
-            event.target.classList.add('active');
-            document.getElementById(tabName + '-content').classList.add('active');
-        }
-
-        async function trainSystem() {
-            const trainBtn = document.getElementById('trainBtn');
-            const trainBtnText = document.getElementById('trainBtnText');
-            const trainStatus = document.getElementById('trainStatus');
-            const trainingProgress = document.getElementById('trainingProgress');
-            const progressFill = document.getElementById('progressFill');
-
-            trainBtn.disabled = true;
-            trainBtnText.innerHTML = '<div class="loading"></div>Training in Progress';
-            trainingProgress.classList.remove('hidden');
-
-            // Simulate progress
-            let progress = 0;
-            const progressInterval = setInterval(() => {
-                progress += Math.random() * 15;
-                if (progress > 95) progress = 95;
-                progressFill.style.width = progress + '%';
-            }, 300);
-
-            try {
-                const response = await fetch('/train', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    }
-                });
-
-                const data = await response.json();
-                clearInterval(progressInterval);
-                progressFill.style.width = '100%';
-
-                if (data.success) {
-                    trainStatus.innerHTML = `<div class="status success">${data.message}</div>`;
-
-                    // Update system status
-                    isSystemTrained = true;
-                    document.getElementById('statusIndicator').classList.add('trained');
-                    document.getElementById('statusText').textContent = 'System Ready';
-                    document.getElementById('predictBtn').disabled = false;
-
-                    // Show accuracy
-                    document.getElementById('accuracyDisplay').classList.remove('hidden');
-                    document.getElementById('accuracyValue').textContent = data.accuracy + '%';
-
-                    // Show rules
-                    if (data.rules && data.rules.length > 0) {
-                        document.getElementById('rulesSection').classList.remove('hidden');
-                        const rulesList = document.getElementById('rulesList');
-                        rulesList.innerHTML = data.rules.map(rule =>
-                            `<div class="rule-item">${rule}</div>`
-                        ).join('');
-                    }
-
-                    trainBtnText.textContent = '✅ System Trained';
-                    trainBtn.classList.add('btn-success');
-                } else {
-                    trainStatus.innerHTML = `<div class="status error">Training failed: ${data.message}</div>`;
-                    trainBtn.disabled = false;
-                    trainBtnText.textContent = '🔄 Retry Training';
-                }
-            } catch (error) {
-                clearInterval(progressInterval);
-                trainStatus.innerHTML = `<div class="status error">Training failed: ${error.message}</div>`;
-                trainBtn.disabled = false;
-                trainBtnText.textContent = '🔄 Retry Training';
-            }
-
-            setTimeout(() => {
-                trainingProgress.classList.add('hidden');
-            }, 1000);
-        }
-
-        document.getElementById('patientForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-
-            if (!isSystemTrained) {
-                document.getElementById('predictStatus').innerHTML =
-                    '<div class="status error">Please train the system first!</div>';
-                return;
-            }
-
-            const predictBtn = document.getElementById('predictBtn');
-            const predictBtnText = document.getElementById('predictBtnText');
-            const predictStatus = document.getElementById('predictStatus');
-            const results = document.getElementById('results');
-
-            predictBtn.disabled = true;
-            predictBtnText.innerHTML = '<div class="loading"></div>Analyzing...';
-            predictStatus.innerHTML = '<div class="status info">🔍 AI is analyzing patient data...</div>';
-
-            const formData = {
-                age: document.getElementById('age').value,
-                blood_pressure_systolic: document.getElementById('blood_pressure_systolic').value,
-                blood_pressure_diastolic: document.getElementById('blood_pressure_diastolic').value,
-                cholesterol: document.getElementById('cholesterol').value,
-                blood_sugar: document.getElementById('blood_sugar').value,
-                heart_rate: document.getElementById('heart_rate').value,
-                bmi: document.getElementById('bmi').value,
-                exercise_hours_per_week: document.getElementById('exercise_hours_per_week').value,
-                smoking_years: document.getElementById('smoking_years').value,
-                family_history: document.getElementById('family_history').value
-            };
-
-            try {
-                const response = await fetch('/predict', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(formData)
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    results.innerHTML = `
-                        <div class="prediction-result">
-                            <div class="diagnosis">Diagnosis: ${data.diagnosis}</div>
-                            <div class="confidence">Confidence: ${data.confidence}%</div>
-                            <div class="explanation">
-                                <h4>🧠 AI Explanation:</h4>
-                                <p>${data.explanation}</p>
-                                <p>${data.recommendations}</p>
-                            </div>
-                        </div>
-                    `;
-                    predictStatus.innerHTML = `<div class="status success">✅ Diagnosis completed successfully</div>`;
-                } else {
-                    predictStatus.innerHTML = `<div class="status error">❌ Diagnosis failed: ${data.message}</div>`;
-                }
-            } catch (error) {
-                predictStatus.innerHTML = `<div class="status error">❌ Network error: ${error.message}</div>`;
-            }
-
-            predictBtn.disabled = false;
-            predictBtnText.innerHTML = '🔮 Generate Diagnosis';
-        });
-
-        // Tooltip functionality
-        document.querySelectorAll('.tooltip').forEach(element => {
-            element.addEventListener('mouseenter', function() {
-                this.setAttribute('data-tooltip', this.getAttribute('data-tooltip'));
-            });
-        });
-
-        // Initialize tabs
-        document.querySelectorAll('.tab-content').forEach((content, index) => {
-            if (index > 0) content.classList.remove('active');
-        });
-    </script>
-</body>
-</html>'''
-class NeuroSymbolicEvolutionarySystem:
-    """Main system combining neural networks with evolutionary symbolic rules"""
-
-    def __init__(self):
-        self.neural_model = None
-        self.symbolic_rules = []
-        self.feature_names = []
-        self.scaler = StandardScaler()
-        self.conditions = ['Healthy', 'Diabetes', 'Heart Disease', 'Hypertension']
-        self.is_trained = False
-
-        # Setup DEAP for evolutionary algorithm
-        if not hasattr(creator, "FitnessMax"):
-            creator.create("FitnessMax", base.Fitness, weights=(1.0,))
-        if not hasattr(creator, "Individual"):
-            creator.create("Individual", list, fitness=creator.FitnessMax)
-
-        self.toolbox = base.Toolbox()
-
-    def prepare_data(self, df):
-        """Prepare dataset for training"""
-        X = df.drop('diagnosis', axis=1)
-        y = df['diagnosis']
-        self.feature_names = X.columns.tolist()
-
-        # Split data
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42, stratify=y
-        )
-
-        # Scale features
-        X_train_scaled = self.scaler.fit_transform(X_train)
-        X_test_scaled = self.scaler.transform(X_test)
-
-        return X_train_scaled, X_test_scaled, y_train, y_test, X_train, X_test
-
-    def train_neural_model(self, X_train, y_train):
-        """Train neural network component"""
-        print("Training Neural Network...")
-        self.neural_model = MLPClassifier(
-            hidden_layer_sizes=(100, 50),
-            max_iter=500,
-            random_state=42,
-            early_stopping=True,
-            validation_fraction=0.1
-        )
-        self.neural_model.fit(X_train, y_train)
-        print(f"Neural Network Training Complete. Iterations: {self.neural_model.n_iter_}")
-
-    def create_individual(self):
-        """Create a random symbolic rule (individual for evolution)"""
-        feature = random.choice(self.feature_names)
-        operator = random.choice(['>', '<', '>=', '<='])
-
-        # Set reasonable thresholds based on feature
-        if feature == 'age':
-            threshold = random.uniform(20, 80)
-        elif 'blood_pressure' in feature:
-            threshold = random.uniform(80, 180)
-        elif feature == 'cholesterol':
-            threshold = random.uniform(150, 300)
-        elif feature == 'blood_sugar':
-            threshold = random.uniform(70, 200)
-        elif feature == 'heart_rate':
-            threshold = random.uniform(50, 120)
-        elif feature == 'bmi':
-            threshold = random.uniform(18, 40)
-        elif feature == 'exercise_hours_per_week':
-            threshold = random.uniform(0, 8)
-        elif feature == 'smoking_years':
-            threshold = random.uniform(0, 30)
-        else:  # family_history
-            threshold = 0.5
-
-        prediction = random.randint(0, 3)
-        confidence = random.uniform(0.5, 1.0)
-
-        return [feature, operator, threshold, prediction, confidence]
-
-    def evaluate_rule(self, individual, X_data, y_true):
-        """Evaluate fitness of a symbolic rule"""
-        feature, operator, threshold, prediction, confidence = individual
-
-        correct_predictions = 0
-        total_applicable = 0
-
-        for idx, (i, row) in enumerate(X_data.iterrows()):
-            patient_data = row.to_dict()
-            rule = SymbolicRule(feature, operator, threshold, prediction, confidence)
-            applies, pred, conf = rule.evaluate(patient_data)
-
-            if applies:
-                total_applicable += 1
-                if pred == y_true.iloc[idx]:
-                    correct_predictions += 1
-
-        if total_applicable == 0:
-            return (0.0,)  # Rule doesn't apply to any cases
-
-        accuracy = correct_predictions / total_applicable
-        coverage = total_applicable / len(X_data)
-
-        # Fitness combines accuracy and coverage
-        fitness = accuracy * 0.7 + coverage * 0.3
-        return (fitness,)
-
-    def evolve_symbolic_rules(self, X_train_raw, y_train, generations=15):
-        """Evolve symbolic rules using genetic algorithm"""
-        print("Evolving Symbolic Rules...")
-
-        # Setup toolbox
-        self.toolbox.register("individual", tools.initIterate, creator.Individual, self.create_individual)
-        self.toolbox.register("population", tools.initRepeat, list, self.toolbox.individual)
-        self.toolbox.register("evaluate", self.evaluate_rule, X_data=X_train_raw, y_true=y_train)
-        self.toolbox.register("mate", self.crossover_rules)
-        self.toolbox.register("mutate", self.mutate_rule)
-        self.toolbox.register("select", tools.selTournament, tournsize=3)
-
-        # Create initial population
-        population = self.toolbox.population(n=50)
-
-        # Evaluate initial population
-        fitnesses = list(map(self.toolbox.evaluate, population))
-        for ind, fit in zip(population, fitnesses):
-            ind.fitness.values = fit
-
-        # Evolution loop
-        for gen in range(generations):
-            # Select next generation
-            offspring = self.toolbox.select(population, len(population))
-            offspring = list(map(self.toolbox.clone, offspring))
-
-            # Crossover and mutation
-            for child1, child2 in zip(offspring[::2], offspring[1::2]):
-                if random.random() < 0.5:
-                    self.toolbox.mate(child1, child2)
-                    del child1.fitness.values
-                    del child2.fitness.values
-
-            for mutant in offspring:
-                if random.random() < 0.2:
-                    self.toolbox.mutate(mutant)
-                    del mutant.fitness.values
-
-            # Evaluate offspring
-            invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
-            fitnesses = map(self.toolbox.evaluate, invalid_ind)
-            for ind, fit in zip(invalid_ind, fitnesses):
-                ind.fitness.values = fit
-
-            population[:] = offspring
-
-        # Extract best rules
-        best_individuals = tools.selBest(population, k=10)
-        self.symbolic_rules = []
-
-        for ind in best_individuals:
-            feature, operator, threshold, prediction, confidence = ind
-            rule = SymbolicRule(feature, operator, threshold, prediction, confidence)
-            self.symbolic_rules.append(rule)
-
-        print(f"Evolution Complete. Generated {len(self.symbolic_rules)} rules.")
-
-    def crossover_rules(self, ind1, ind2):
-        """Crossover operation for symbolic rules"""
-        # Swap random components
-        if random.random() < 0.5:
-            ind1[0], ind2[0] = ind2[0], ind1[0]  # feature
-        if random.random() < 0.5:
-            ind1[1], ind2[1] = ind2[1], ind1[1]  # operator
-        if random.random() < 0.5:
-            ind1[2], ind2[2] = ind2[2], ind1[2]  # threshold
-        if random.random() < 0.5:
-            ind1[3], ind2[3] = ind2[3], ind1[3]  # prediction
-
-        return ind1, ind2
-
-    def mutate_rule(self, individual):
-        """Mutation operation for symbolic rules"""
-        mutation_type = random.randint(0, 4)
-
-        if mutation_type == 0:  # Mutate feature
-            individual[0] = random.choice(self.feature_names)
-        elif mutation_type == 1:  # Mutate operator
-            individual[1] = random.choice(['>', '<', '>=', '<='])
-        elif mutation_type == 2:  # Mutate threshold
-            individual[2] += random.gauss(0, individual[2] * 0.1)
-        elif mutation_type == 3:  # Mutate prediction
-            individual[3] = random.randint(0, 3)
-        else:  # Mutate confidence
-            individual[4] = max(0.1, min(1.0, individual[4] + random.gauss(0, 0.1)))
-
-        return (individual,)
-
-    def hybrid_predict(self, X_test_scaled, X_test_raw):
-        """Make predictions using hybrid neuro-symbolic approach"""
-        neural_preds = self.neural_model.predict_proba(X_test_scaled)
-        hybrid_preds = []
-        explanations = []
-
-        for i, (neural_prob, row) in enumerate(zip(neural_preds, X_test_raw.iterrows())):
-            patient_data = row[1].to_dict()
-
-            # Check if any symbolic rule applies
-            applicable_rules = []
-            for rule in self.symbolic_rules:
-                applies, pred, conf = rule.evaluate(patient_data)
-                if applies:
-                    applicable_rules.append((rule, pred, conf))
-
-            if applicable_rules:
-                # Use symbolic rule with highest confidence
-                best_rule, symbolic_pred, confidence = max(applicable_rules, key=lambda x: x[2])
-
-                # Combine neural and symbolic predictions
-                neural_pred = np.argmax(neural_prob)
-                neural_confidence = np.max(neural_prob)
-
-                # Weighted combination
-                if confidence > neural_confidence:
-                    final_pred = symbolic_pred
-                    explanation = f"Symbolic Rule: {best_rule}"
-                else:
-                    final_pred = neural_pred
-                    explanation = f"Neural Network (conf: {neural_confidence:.3f})"
-            else:
-                # Use neural network prediction
-                final_pred = np.argmax(neural_prob)
-                explanation = f"Neural Network (conf: {np.max(neural_prob):.3f})"
-
-            hybrid_preds.append(final_pred)
-            explanations.append(explanation)
-
-        return np.array(hybrid_preds), explanations
-
-    def predict_single_patient(self, patient_data):
-        """Make prediction for a single patient"""
-        if not self.is_trained:
-            return None, "System not trained yet"
-
-        # Convert to DataFrame for scaling
-        df = pd.DataFrame([patient_data])
-        df_scaled = self.scaler.transform(df)
-
-        # Get neural network prediction
-        neural_prob = self.neural_model.predict_proba(df_scaled)[0]
-
-        # Check symbolic rules
-        applicable_rules = []
-        for rule in self.symbolic_rules:
-            applies, pred, conf = rule.evaluate(patient_data)
-            if applies:
-                applicable_rules.append((rule, pred, conf))
-
-        if applicable_rules:
-            # Use symbolic rule with highest confidence
-            best_rule, symbolic_pred, confidence = max(applicable_rules, key=lambda x: x[2])
-
-            # Combine neural and symbolic predictions
-            neural_pred = np.argmax(neural_prob)
-            neural_confidence = np.max(neural_prob)
-
-            # Weighted combination
-            if confidence > neural_confidence:
-                final_pred = symbolic_pred
-                explanation = f"Symbolic Rule: {best_rule}"
-            else:
-                final_pred = neural_pred
-                explanation = f"Neural Network (conf: {neural_confidence:.3f})"
-        else:
-            # Use neural network prediction
-            final_pred = np.argmax(neural_prob)
-            explanation = f"Neural Network (conf: {np.max(neural_prob):.3f})"
-
-        return final_pred, explanation
-
-# Global system instance
-system = NeuroSymbolicEvolutionarySystem()
-
+app.config.update(
+    SECRET_KEY='your-secret-key-here',
+    SQLALCHEMY_DATABASE_URI='sqlite:///edutrade.db',
+    UPLOAD_FOLDER=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'uploads'),
+    MAX_CONTENT_LENGTH=16 * 1024 * 1024,  # 16MB max file size
+    MAIL_SERVER='smtp.gmail.com',
+    MAIL_PORT=587,
+    MAIL_USE_TLS=True,
+    MAIL_USERNAME='stud.studentsmart@gmail.com',
+    MAIL_PASSWORD='jygr uhcl odmk flve',
+)
+def check_mail_configuration():
+    required_configs = [
+        'MAIL_SERVER',
+        'MAIL_PORT',
+        'MAIL_USERNAME',
+        'MAIL_PASSWORD',
+        'MAIL_USE_TLS'
+    ]
+
+    missing_configs = [config for config in required_configs
+                      if not app.config.get(config)]
+
+    if missing_configs:
+        print("WARNING: Missing email configurations:", missing_configs)
+        return False
+    return True
+def allowed_file(filename):
+    ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt', 'rtf', 'ppt', 'pptx', 'xls', 'xlsx'}
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+db = SQLAlchemy(app)
+mail = Mail(app)
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(128))
+    full_name = db.Column(db.String(100))
+    department = db.Column(db.String(100))
+    year = db.Column(db.Integer)
+    profile_picture = db.Column(db.String(200))
+    is_verified = db.Column(db.Boolean, default=False) 
+    verification_token = db.Column(db.String(100), nullable=True)
+    reset_token = db.Column(db.String(100))
+    reset_token_expiry = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    listings = db.relationship('Listing', backref='seller', lazy=True)
+    college = db.Column(db.String(200), nullable=False)
+    is_admin = db.Column(db.Boolean, default=False)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+class Listing(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    price = db.Column(db.Float, nullable=False)
+    rent_price = db.Column(db.Float)
+    category = db.Column(db.String(50), nullable=False)
+    condition = db.Column(db.String(50), nullable=False)
+    image_url = db.Column(db.String(200), nullable=False)
+    is_for_rent = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    seller_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    
+    # New fields
+    product_type = db.Column(db.String(50))  # Mobile, laptop, books, etc.
+    branch = db.Column(db.String(50))        # CSE, etc.
+    study_year = db.Column(db.String(20))    # 2nd year, etc.
+    working_condition = db.Column(db.String(50))  # Fully functional, etc.
+    warranty_status = db.Column(db.String(50))    # Yes/No
+    subject = db.Column(db.String(100))      # For books
+    faculty_name = db.Column(db.String(100))  # For books - faculty name
+    is_fake_warning = db.Column(db.Boolean, default=False)
+    is_softcopy = db.Column(db.Boolean, default=False)
+    file_url = db.Column(db.String(200))
+# Change this in your models
+class MessageThread(db.Model):  # Changed from Message
+    id = db.Column(db.Integer, primary_key=True)
+    sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    receiver_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    listing_id = db.Column(db.Integer, db.ForeignKey('listing.id'), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    read = db.Column(db.Boolean, default=False)
+
+    sender = db.relationship('User', foreign_keys=[sender_id], backref='sent_messages')
+    receiver = db.relationship('User', foreign_keys=[receiver_id], backref='received_messages')
+    listing = db.relationship('Listing', backref='messages')
+    parent_message_id = db.Column(db.Integer, db.ForeignKey('message_thread.id'), nullable=True)
+    replies = db.relationship('MessageThread', backref=db.backref('parent_message', remote_side=[id]))
+
+class Wishlist(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    listing_id = db.Column(db.Integer, db.ForeignKey('listing.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    user = db.relationship('User', backref='wishlist_items')
+    listing = db.relationship('Listing', backref='wishlist_entries')
+
+class Report(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    reporter_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    reported_listing_id = db.Column(db.Integer, db.ForeignKey('listing.id'), nullable=True)
+    message_thread_id = db.Column(db.Integer, db.ForeignKey('message_thread.id'), nullable=True)
+    description = db.Column(db.Text, nullable=False)
+    image_url = db.Column(db.String(200))
+    status = db.Column(db.String(50), default='pending') 
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    reporter = db.relationship('User', backref='reports_made')
+    reported_listing = db.relationship('Listing', backref='reports')
+    message_thread = db.relationship('MessageThread', backref='reports')
+
+ALLOWED_DOMAINS = ['ac.in', 'edu', 'org', 'in', 'org.in', 'ac.edu', 'ac.co.in']
+
+def send_verification_email(email, token):
+    try:
+        if not check_mail_configuration():
+            print("Email configuration is incomplete")
+            return False
+
+        msg = Message('Verify Your StudentsMart Account',
+                      sender=app.config['MAIL_USERNAME'],
+                      recipients=[email])
+        verification_url = url_for('verify_email', token=token, _external=True)
+        msg.body = f'Click to verify your account: {verification_url}'
+        
+        try:
+            mail.send(msg)
+            print(f"Verification email sent successfully to {email}")
+            return True
+        except Exception as e:
+            print(f"Failed to send verification email: {str(e)}")
+            if "Username and Password not accepted" in str(e):
+                print("Please check your Gmail credentials and make sure:")
+                print("1. 2-Step Verification is enabled on your Gmail account")
+                print("2. You're using an App Password instead of your regular password")
+                print("3. The App Password is correctly copied without spaces")
+            return False
+    except Exception as e:
+        print(f"Error in send_verification_email: {str(e)}")
+        return False
+
+def save_image(image):
+    if not image:
+        return None
+    filename = secure_filename(image.filename)
+    unique_filename = f"{uuid.uuid4()}_{filename}"
+    image_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+    
+    
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    image.save(image_path)
+    return f"uploads/{unique_filename}"
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE)
 
-@app.route('/train', methods=['POST'])
-def train_system():
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+@app.route('/test-email')
+def test_email():
     try:
-        # Generate dataset
-        dataset_gen = MedicalDatasetGenerator(n_samples=800)  # Reduced for faster training
-        df = dataset_gen.generate_dataset()
+        msg = Message('Test Email',
+                    sender=app.config['MAIL_USERNAME'],
+                    recipients=[app.config['MAIL_USERNAME']])
+        msg.body = 'This is a test email'
+        mail.send(msg)
+        return jsonify({'message': 'Test email sent successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-        # Prepare data
-        X_train_scaled, X_test_scaled, y_train, y_test, X_train_raw, X_test_raw = system.prepare_data(df)
+# Authentication Routes
+@app.route('/register', methods=['POST'])
+def register():
+    try:
+        data = request.form
+        email = data.get('email', '').strip().lower()
 
-        # Train neural component
-        system.train_neural_model(X_train_scaled, y_train)
+        # Validate email format
+        if '@' not in email:
+            return jsonify({'error': 'Invalid email format'}), 400
 
-        # Evolve symbolic rules
-        system.evolve_symbolic_rules(X_train_raw, y_train, generations=10)  # Reduced generations
+        # Split domain parts
+        domain = email.split('@')[-1]
+        domain_parts = domain.split('.')
 
-        # Mark as trained
-        system.is_trained = True
+        # Check against allowed domains
+        ALLOWED_DOMAINS = ['ac.in', 'edu', 'org', 'in','org.in', 'ac.edu','ac.co.in']
+        valid_domain = any(
+            '.'.join(domain_parts[-len(d.split('.')):]) == d
+            for d in ALLOWED_DOMAINS
+        )
 
-        # Get accuracy
-        hybrid_preds, explanations = system.hybrid_predict(X_test_scaled, X_test_raw)
-        accuracy = accuracy_score(y_test, hybrid_preds)
+        if not valid_domain:
+            return jsonify({
+                'error': 'Only institutional emails allowed. Valid domains: ' + ', '.join(ALLOWED_DOMAINS)
+            }), 400
 
-        # Get rules for display
-        rules = [str(rule) for rule in system.symbolic_rules[:5]]  # Show top 5 rules
+        # Check existing user
+        if User.query.filter_by(email=email).first():
+            return jsonify({'error': 'Email already registered'}), 400
+
+        # Create verification token
+        verification_token = str(uuid.uuid4())
+
+        # Create new user
+        user = User(
+            email=email,
+            full_name=data['full_name'],
+            department=data['department'],
+            year=int(data['year']),
+            college=data['college'],
+            is_verified=False,
+            verification_token=verification_token
+        )
+        user.set_password(data['password'])
+
+        db.session.add(user)
+        db.session.commit()
+
+        # Send verification email
+        try:
+            msg = Message('Verify Your StudentsMart Account',
+                        sender=app.config['MAIL_USERNAME'],
+                        recipients=[user.email])
+            verification_url = url_for('verify_email', token=verification_token, _external=True)
+            msg.body = f'''Please verify your email by clicking the link below:
+            {verification_url}
+
+If you didn't create this account, please ignore this email.'''
+            mail.send(msg)
+        except Exception as e:
+            db.session.rollback()
+            print(f"Failed to send verification email: {str(e)}")
+            return jsonify({'error': 'Failed to send verification email'}), 500
 
         return jsonify({
-            'success': True,
-            'accuracy': round(accuracy * 100, 2),
-            'rules': rules,
-            'message': 'System trained successfully!'
+            'message': 'Registration successful! Please check your email to verify your account.',
+            'user_id': user.id
+        })
+
+    except KeyError as e:
+        return jsonify({'error': f'Missing required field: {str(e)}'}), 400
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+@app.route('/login', methods=['POST'])
+def login():
+    try:
+        data = request.form
+        
+        if not all(k in data for k in ['email', 'password']):
+            return jsonify({'error': 'Missing email or password'}), 400
+
+        user = User.query.filter_by(email=data['email']).first()
+
+        if not user or not user.check_password(data['password']):
+            return jsonify({'error': 'Invalid email or password'}), 401
+
+        if not user.is_verified:
+            return jsonify({'error': 'Please verify your email first'}), 401
+
+        login_user(user)
+
+        return jsonify({
+            'message': 'Login successful',
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'full_name': user.full_name,
+                'department': user.department,
+                'year': user.year,
+                'is_admin': user.is_admin  # Include admin status in response
+            }
         })
 
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return jsonify({'message': 'Logged out successfully'})
+
+
+@app.route('/forgot-password', methods=['POST'])
+def forgot_password():
+    try:
+        email = request.json.get('email')
+        if not email:
+            return jsonify({'error': 'Email is required'}), 400
+
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            return jsonify({'error': 'Email not found'}), 404
+
+        # Generate reset token
+        reset_token = str(uuid.uuid4())
+        user.reset_token = reset_token
+        user.reset_token_expiry = datetime.utcnow() + timedelta(hours=1)
+        db.session.commit()
+
+        # Send reset email
+        send_reset_email(email, reset_token)
+
+        return jsonify({'message': 'Password reset instructions sent to your email'})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/reset-password', methods=['POST'])
+def reset_password():
+    try:
+        data = request.json
+        if not all(k in data for k in ['token', 'new_password']):
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        user = User.query.filter_by(reset_token=data['token']).first()
+        if not user or user.reset_token_expiry < datetime.utcnow():
+            return jsonify({'error': 'Invalid or expired reset token'}), 400
+
+        user.set_password(data['new_password'])
+        user.reset_token = None
+        user.reset_token_expiry = None
+        db.session.commit()
+
+        return jsonify({'message': 'Password reset successful'})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+@app.route('/verify-email/<token>')
+def verify_email(token):
+    try:
+        user = User.query.filter_by(verification_token=token).first()
+        if not user:
+            error_html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Verify Your StudenTsmart Account</title>
+                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+                <style>
+                    :root {
+                        --primary-color: #2563eb;
+                        --secondary-color: #3b82f6;
+                        --accent-color: #60a5fa;
+                        --success-color: #22c55e;
+                        --error-color: #ef4444;
+                        --text-dark: #1f2937;
+                        --text-light: #6b7280;
+                        --background-light: #f3f4f6;
+                    }
+                    
+                    body {
+                        font-family: 'Inter', sans-serif;
+                        background-color: var(--background-light);
+                        color: var(--text-dark);
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        height: 100vh;
+                        margin: 0;
+                    }
+                    
+                    .error-container {
+                        text-align: center;
+                        padding: 2rem;
+                        background-color: white;
+                        border-radius: 1rem;
+                        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                        width: 90%;
+                        max-width: 500px;
+                    }
+                    
+                    h1 {
+                        color: var(--error-color);
+                        margin-bottom: 1rem;
+                    }
+                    
+                    p {
+                        color: var(--text-light);
+                        margin-bottom: 1.5rem;
+                    }
+                    
+                    .btn-primary {
+                        display: inline-block;
+                        background-color: var(--primary-color);
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 0.5rem;
+                        padding: 0.75rem 1.5rem;
+                        font-weight: 600;
+                        transition: background-color 0.2s;
+                    }
+                    
+                    .btn-primary:hover {
+                        background-color: var(--secondary-color);
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="error-container">
+                    <h1>Invalid Verification Link</h1>
+                    <p>The verification link you clicked is invalid or has expired.</p>
+                    <a href="/" class="btn-primary">Get to the website</a>
+                </div>
+            </body>
+            </html>
+            """
+            return error_html, 400
+        
+        user.is_verified = True
+        user.verification_token = None
+        db.session.commit()
+        
+        # Return HTML success page with custom styling
+        success_html = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Verify Your StudenTsmart Account</title>
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+            <style>
+                :root {
+                    --primary-color: #2563eb;
+                    --secondary-color: #3b82f6;
+                    --accent-color: #60a5fa;
+                    --success-color: #22c55e;
+                    --error-color: #ef4444;
+                    --text-dark: #1f2937;
+                    --text-light: #6b7280;
+                    --background-light: #f3f4f6;
+                }
+                
+                body {
+                    font-family: 'Inter', sans-serif;
+                    background-color: var(--background-light);
+                    color: var(--text-dark);
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    height: 100vh;
+                    margin: 0;
+                }
+                
+                .success-container {
+                    text-align: center;
+                    padding: 2rem;
+                    background-color: white;
+                    border-radius: 1rem;
+                    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                    width: 90%;
+                    max-width: 500px;
+                }
+                
+                h1 {
+                    color: var(--success-color);
+                    margin-bottom: 1rem;
+                }
+                
+                p {
+                    color: var(--text-light);
+                    margin-bottom: 1.5rem;
+                }
+                
+                .check-icon {
+                    font-size: 60px;
+                    color: var(--success-color);
+                    margin-bottom: 1rem;
+                }
+                
+                .btn-primary {
+                    display: inline-block;
+                    background-color: var(--primary-color);
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 0.5rem;
+                    padding: 0.75rem 1.5rem;
+                    font-weight: 600;
+                    transition: background-color 0.2s;
+                }
+                
+                .btn-primary:hover {
+                    background-color: var(--secondary-color);
+                }
+            </style>
+        </head>
+        <body>
+            <div class="success-container">
+                <div class="check-icon">✓</div>
+                <h1>Verify Your StudentsMart Account</h1>
+                <p>Your email has been verified successfully! You can now access the StudenTsmart website.</p>
+                <a href="/" class="btn-primary">Get to the website</a>
+            </div>
+        </body>
+        </html>
+        """
+        return success_html
+        
+    except Exception as e:
+        db.session.rollback()
+        error_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Verification Error</title>
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+            <style>
+                :root {{
+                    --primary-color: #2563eb;
+                    --secondary-color: #3b82f6;
+                    --accent-color: #60a5fa;
+                    --success-color: #22c55e;
+                    --error-color: #ef4444;
+                    --text-dark: #1f2937;
+                    --text-light: #6b7280;
+                    --background-light: #f3f4f6;
+                }}
+                
+                body {{
+                    font-family: 'Inter', sans-serif;
+                    background-color: var(--background-light);
+                    color: var(--text-dark);
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    height: 100vh;
+                    margin: 0;
+                }}
+                
+                .error-container {{
+                    text-align: center;
+                    padding: 2rem;
+                    background-color: white;
+                    border-radius: 1rem;
+                    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                    width: 90%;
+                    max-width: 500px;
+                }}
+                
+                h1 {{
+                    color: var(--error-color);
+                    margin-bottom: 1rem;
+                }}
+                
+                p {{
+                    color: var(--text-light);
+                    margin-bottom: 1.5rem;
+                }}
+                
+                .btn-primary {{
+                    display: inline-block;
+                    background-color: var(--primary-color);
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 0.5rem;
+                    padding: 0.75rem 1.5rem;
+                    font-weight: 600;
+                    transition: background-color 0.2s;
+                }}
+                
+                .btn-primary:hover {{
+                    background-color: var(--secondary-color);
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="error-container">
+                <h1>Verification Error</h1>
+                <p>An error occurred during verification. Please try again later.</p>
+                <a href="/" class="btn-primary">Get to the website</a>
+            </div>
+        </body>
+        </html>
+        """
+        return error_html, 500
+# Listing Routes
+@app.route('/create-listing', methods=['POST'])
+@login_required
+def create_listing():
+    try:
+        if 'image' not in request.files:
+            return jsonify({'error': 'No image provided'}), 400
+
+        image = request.files['image']
+        if image.filename == '':
+            return jsonify({'error': 'No image selected'}), 400
+
+        # Save the image and get its path
+        image_url = save_image(image)
+        if not image_url:
+            return jsonify({'error': 'Failed to save image'}), 500
+
+        # Check if listing is for rent
+        is_for_rent = request.form.get('is_for_rent') == 'true'
+
+        # Set price and rent_price based on listing type
+        price = 0
+        rent_price = 0
+
+        if is_for_rent:
+            rent_price = float(request.form.get('rent_price', 0))
+            # Optional: Store rental tenure in description or as a separate field
+            rent_tenure = request.form.get('rent_tenure', '0')
+        else:
+            price = float(request.form.get('price', 0))
+        
+        is_softcopy = request.form.get('copy_type') == 'soft'
+        file = request.files.get('document') if is_softcopy else None
+
+        # Handle file upload
+        if is_softcopy and file:
+            if not allowed_file(file.filename):
+                return jsonify({'error': 'Invalid file type. Only PDF and Word documents allowed'}), 400
+
+            try:
+                # Check if we can locate working files to understand the correct path
+                working_files_check = []
+                test_filenames = [
+                    "2881bee4-a0ee-4efe-ae76-4dd654b79429_NLP_Exam_Preparation_Topics.pdf",
+                    "603f8fa0-0fa4-4295-a383-81dd385778e2_N_L_RAM_CHARAN_TEJA.pdf"
+                ]
+                
+                for test_file in test_filenames:
+                    possible_locations = [
+                        os.path.join(app.root_path, 'static', 'uploads', test_file),
+                        os.path.join(os.getcwd(), 'static', 'uploads', test_file)
+                    ]
+                    
+                    for location in possible_locations:
+                        if os.path.exists(location):
+                            working_files_check.append({
+                                "file": test_file,
+                                "found_at": location,
+                                "exists": True
+                            })
+                            
+                print(f"Working files check: {working_files_check}")
+                
+                # Ensure upload directory exists
+                if working_files_check:
+                    # Use the location where working files were found
+                    uploads_dir = os.path.dirname(working_files_check[0]["found_at"])
+                    print(f"Using uploads directory where working files were found: {uploads_dir}")
+                else:
+                    # Default location
+                    uploads_dir = os.path.join(app.root_path, 'static', 'uploads')
+                    print(f"No working files found, using default uploads directory: {uploads_dir}")
+                
+                os.makedirs(uploads_dir, exist_ok=True)
+
+                # Generate a unique filename to prevent collisions
+                filename = secure_filename(f"{uuid.uuid4()}_{file.filename}")
+                file_path = os.path.join(uploads_dir, filename)
+                file.save(file_path)
+                
+                # Store only the filename without any path prefix
+                file_url = filename
+                
+                print(f"Softcopy file saved at: {file_path}")
+                print(f"Stored file_url as: {file_url}")
+                print(f"File exists after save: {os.path.exists(file_path)}")
+            except Exception as e:
+                print(f"Error saving file: {str(e)}")
+                return jsonify({'error': f'Failed to save file: {str(e)}'}), 500
+        else:
+            file_url = None
+        # Create listing
+        listing = Listing(
+            title=request.form['title'],
+            description=request.form['description'],
+            price=price,
+            rent_price=rent_price,
+            category=request.form['category'],
+            condition=request.form.get('working_condition', 'Not specified'),
+            image_url=image_url,
+            seller_id=current_user.id,
+            product_type=request.form.get('product_type'),
+            branch=request.form.get('branch'),
+            study_year=request.form.get('study_year'),
+            working_condition=request.form.get('working_condition'),
+            warranty_status=request.form.get('warranty_status'),
+            subject=request.form.get('subject'),
+            faculty_name=request.form.get('faculty_name'),
+            is_softcopy=is_softcopy,
+            file_url=file_url,
+            is_fake_warning=bool(request.form.get('is_fake_warning', False)),
+            is_for_rent=is_for_rent
+        )
+
+        db.session.add(listing)
+        db.session.commit()
+
         return jsonify({
-            'success': False,
-            'message': f'Training failed: {str(e)}'
+            'message': 'Listing created successfully',
+            'listing': {
+                'id': listing.id,
+                'title': listing.title,
+                'description': listing.description,
+                'price': listing.price,
+                'rent_price': listing.rent_price,
+                'category': listing.category,
+                'condition': listing.condition,
+                'image_url': listing.image_url,
+                'product_type': listing.product_type,
+                'created_at': listing.created_at.isoformat(),
+                'is_for_rent': listing.is_for_rent,
+                'is_softcopy': listing.is_softcopy,
+                'faculty_name': listing.faculty_name
+            }
         })
 
-@app.route('/predict', methods=['POST'])
-def predict():
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+@app.route('/listings')
+def get_listings():
     try:
-        if not system.is_trained:
-            return jsonify({
-                'success': False,
-                'message': 'System not trained yet. Please train the system first.'
-            })
+        query = request.args.get('q', '')
+        category = request.args.get('category', '')
+        sort_by = request.args.get('sort_by', 'created_at')
+        college = current_user.college if current_user.is_authenticated else ''
 
+        # Base query with joins and initial filtering
+        listings_query = Listing.query.join(User)
+        if college:
+            listings_query = listings_query.filter(User.college == college)
+
+        # Search filters
+        if query:
+            listings_query = listings_query.filter(
+                db.or_(
+                    Listing.title.ilike(f'%{query}%'),
+                    Listing.description.ilike(f'%{query}%'),
+                    Listing.subject.ilike(f'%{query}%'),
+                    Listing.faculty_name.ilike(f'%{query}%')
+                )
+            )
+
+        # Category filter
+        if category:
+            listings_query = listings_query.filter(
+                Listing.category.ilike(category)
+            )
+
+        # Sorting options
+        sorting_options = {
+            'price_low': Listing.price.asc(),
+            'price_high': Listing.price.desc(),
+            'recent': Listing.created_at.desc(),
+            'softcopy': Listing.is_softcopy.desc()
+        }
+        listings_query = listings_query.order_by(
+            sorting_options.get(sort_by, Listing.created_at.desc())
+        )
+
+        listings = listings_query.all()
+
+        return jsonify({
+            'listings': [{
+                'id': l.id,
+                'title': l.title,
+                'description': l.description,
+                'price': l.price,
+                'rent_price': l.rent_price,
+                'category': l.category,
+                'condition': l.condition,
+                'image_url': l.image_url,
+                'is_for_rent': l.is_for_rent,
+                'created_at': l.created_at.isoformat(),
+                'seller': {
+                    'id': l.seller.id,
+                    'name': l.seller.full_name,
+                    'college': l.seller.college
+                },
+                # Soft copy fields
+                'is_softcopy': l.is_softcopy,
+                'file_url': l.file_url,
+
+                # Additional fields
+                'product_type': l.product_type,
+                'branch': l.branch,
+                'study_year': l.study_year,
+                'working_condition': l.working_condition,
+                'warranty_status': l.warranty_status,
+                'subject': l.subject,
+                'faculty_name': l.faculty_name,
+                'is_fake_warning': l.is_fake_warning
+            } for l in listings]
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def send_reset_email(email, token):
+    try:
+        msg = Message('Reset your EduTrade password',
+                     sender=app.config['MAIL_USERNAME'],
+                     recipients=[email])
+        msg.body = f'Click the following link to reset your password: {url_for("reset_password", token=token, _external=True)}'
+        mail.send(msg)
+    except Exception as e:
+        print(f"Error sending reset email: {str(e)}")
+@app.route('/check-session')
+def check_session():
+    if current_user.is_authenticated:
+        return jsonify({
+            'authenticated': True,
+            'user': {
+                'id': current_user.id,
+                'email': current_user.email,
+                'full_name': current_user.full_name,
+                'department': current_user.department,
+                'year': current_user.year,
+                'is_admin': current_user.is_admin  # Add is_admin status
+            }
+        })
+    return jsonify({'authenticated': False})
+@app.route('/api/my-listings')
+@login_required
+def get_my_listings():
+    try:
+        listings = Listing.query.filter_by(seller_id=current_user.id).all()
+        return jsonify({
+            'listings': [{
+                'id': l.id,
+                'title': l.title,
+                'description': l.description,
+                'price': l.price,
+                'category': l.category,
+                'condition': l.condition,
+                'image_url': l.image_url,
+                'created_at': l.created_at.isoformat(),
+                'product_type': l.product_type,
+                'branch': l.branch,
+                'study_year': l.study_year,
+                'working_condition': l.working_condition,
+                'warranty_status': l.warranty_status,
+                'subject': l.subject,
+                'is_fake_warning': l.is_fake_warning,
+                'is_softcopy': l.is_softcopy,
+                'file_url': l.file_url
+            } for l in listings]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+@app.route('/api/wishlist')
+@login_required
+def get_wishlist():
+    try:
+        items = Wishlist.query.filter_by(user_id=current_user.id).all()
+        return jsonify({
+            'items': [{
+                'id': item.id,
+                'listing': {
+                    'id': item.listing.id,
+                    'title': item.listing.title,
+                    'price': item.listing.price,
+                    'image_url': item.listing.image_url,
+                    'seller': {
+                        'id': item.listing.seller.id,
+                        'name': item.listing.seller.full_name
+                    }
+                },
+                'created_at': item.created_at.isoformat()
+            } for item in items]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+@app.route('/api/wishlist/add', methods=['POST'])
+@login_required
+def add_to_wishlist():
+    try:
+        listing_id = request.json.get('listing_id')
+        if not listing_id:
+            return jsonify({'error': 'Listing ID required'}), 400
+            
+        existing = Wishlist.query.filter_by(
+            user_id=current_user.id,
+            listing_id=listing_id
+        ).first()
+        
+        if existing:
+            return jsonify({'message': 'Item already in wishlist'})
+            
+        wishlist_item = Wishlist(
+            user_id=current_user.id,
+            listing_id=listing_id
+        )
+        
+        db.session.add(wishlist_item)
+        db.session.commit()
+        
+        return jsonify({'message': 'Added to wishlist successfully'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+@app.route('/api/messages')
+@login_required
+def get_messages():
+    try:
+        other_user_id = request.args.get('other_user_id')
+        listing_id = request.args.get('listing_id')
+
+        query = MessageThread.query
+
+        if other_user_id and listing_id:
+            # Get specific conversation
+            query = query.filter(
+                MessageThread.listing_id == listing_id,
+                db.or_(
+                    db.and_(MessageThread.sender_id == current_user.id, MessageThread.receiver_id == other_user_id),
+                    db.and_(MessageThread.sender_id == other_user_id, MessageThread.receiver_id == current_user.id)
+                )
+            )
+        else:
+            # Get all conversations
+            query = query.filter(
+                db.or_(
+                    MessageThread.sender_id == current_user.id,
+                    MessageThread.receiver_id == current_user.id
+                )
+            )
+
+        messages = query.order_by(MessageThread.created_at.asc()).all()
+
+        # Mark received messages as read
+        unread_messages = [m for m in messages
+                         if m.receiver_id == current_user.id and not m.read]
+        for message in unread_messages:
+            message.read = True
+
+        if unread_messages:
+            db.session.commit()
+
+        return jsonify({
+            'messages': [{
+                'id': m.id,
+                'content': m.content,
+                'sender_id': m.sender_id,
+                'receiver_id': m.receiver_id,
+                'listing_id': m.listing_id,
+                'created_at': m.created_at.isoformat(),
+                'read': m.read,
+                'sender': {
+                    'id': m.sender.id,
+                    'full_name': m.sender.full_name,
+                    'profile_picture': m.sender.profile_picture
+                },
+                'receiver': {
+                    'id': m.receiver.id,
+                    'full_name': m.receiver.full_name,
+                    'profile_picture': m.receiver.profile_picture
+                }
+            } for m in messages]
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/messages/send', methods=['POST'])
+@login_required
+def send_message():
+    try:
         data = request.json
 
-        # Extract patient data
-        patient_data = {
-            'age': float(data['age']),
-            'blood_pressure_systolic': float(data['blood_pressure_systolic']),
-            'blood_pressure_diastolic': float(data['blood_pressure_diastolic']),
-            'cholesterol': float(data['cholesterol']),
-            'blood_sugar': float(data['blood_sugar']),
-            'heart_rate': float(data['heart_rate']),
-            'bmi': float(data['bmi']),
-            'exercise_hours_per_week': float(data['exercise_hours_per_week']),
-            'smoking_years': float(data['smoking_years']),
-            'family_history': float(data['family_history'])
-        }
+        # Validate required fields
+        if not all(k in data for k in ['receiver_id', 'listing_id', 'content']):
+            return jsonify({'error': 'Missing required fields'}), 400
 
-        # Make prediction
-        prediction, explanation = system.predict_single_patient(patient_data)
+        # Create new message
+        message = MessageThread(
+            sender_id=current_user.id,
+            receiver_id=data['receiver_id'],
+            listing_id=data['listing_id'],
+            content=data['content']
+        )
 
-        if prediction is None:
-            return jsonify({
-                'success': False,
-                'message': explanation
-            })
-
-        diagnosis = system.conditions[prediction]
+        db.session.add(message)
+        db.session.commit()
 
         return jsonify({
-            'success': True,
-            'diagnosis': diagnosis,
-            'explanation': explanation,
-            'prediction_code': int(prediction)
+            'message': 'Message sent successfully',
+            'data': {
+                'id': message.id,
+                'content': message.content,
+                'sender_id': message.sender_id,
+                'receiver_id': message.receiver_id,
+                'listing_id': message.listing_id,
+                'created_at': message.created_at.isoformat(),
+                'read': message.read
+            }
         })
 
     except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+@app.route('/api/messages/reply', methods=['POST'])
+@login_required
+def reply_to_message():
+    try:
+        data = request.json
+        if not all(k in data for k in ['parent_message_id', 'content']):
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        # Get the parent message
+        parent_message = MessageThread.query.get_or_404(data['parent_message_id'])
+
+        # Create the reply
+        reply = MessageThread(
+            sender_id=current_user.id,
+            receiver_id=parent_message.sender_id if parent_message.receiver_id == current_user.id else parent_message.receiver_id,
+            listing_id=parent_message.listing_id,
+            content=data['content'],
+            parent_message_id=parent_message.id
+        )
+
+        db.session.add(reply)
+        db.session.commit()
+
         return jsonify({
-            'success': False,
-            'message': f'Prediction failed: {str(e)}'
+            'message': 'Reply sent successfully',
+            'reply': {
+                'id': reply.id,
+                'content': reply.content,
+                'sender': {
+                    'id': reply.sender.id,
+                    'name': reply.sender.full_name
+                },
+                'created_at': reply.created_at.isoformat()
+            }
         })
 
-@app.route('/get_rules')
-def get_rules():
-    if not system.is_trained:
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+@app.route('/api/messages/check-new')
+@login_required
+def check_new_messages():
+    try:
+        since = request.args.get('since')
+        since_time = datetime.fromisoformat(since.replace('Z', '+00:00'))
+        
+        new_messages = MessageThread.query.filter(
+            MessageThread.receiver_id == current_user.id,
+            MessageThread.created_at > since_time,
+            MessageThread.read == False
+        ).all()
+        
         return jsonify({
-            'success': False,
-            'message': 'System not trained yet.'
+            'messages': [{
+                'id': m.id,
+                'content': m.content,
+                'created_at': m.created_at.isoformat(),
+                'sender': {
+                    'id': m.sender.id,
+                    'full_name': m.sender.full_name
+                },
+                'listing': {
+                    'id': m.listing.id,
+                    'title': m.listing.title
+                }
+            } for m in new_messages]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+@app.route('/api/listings/<int:listing_id>', methods=['DELETE'])
+@login_required
+def delete_listing(listing_id):
+    try:
+        listing = Listing.query.get_or_404(listing_id)
+        
+        # Check if the current user owns this listing
+        if listing.seller_id != current_user.id:
+            return jsonify({'error': 'Unauthorized'}), 403
+            
+        # Delete the image file if it exists
+        if listing.image_url:
+            try:
+                image_path = os.path.join(app.config['UPLOAD_FOLDER'], listing.image_url.split('/')[-1])
+                if os.path.exists(image_path):
+                    os.remove(image_path)
+            except Exception as e:
+                print(f"Error deleting image: {str(e)}")
+        
+        # Delete the listing
+        db.session.delete(listing)
+        db.session.commit()
+        
+        return jsonify({'message': 'Listing deleted successfully'})
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+@app.route('/my-listings')
+@login_required
+def my_listings_page():
+    return send_file('index.html')
+@app.route('/my-wishlist')
+@login_required
+def my_wishlist_page():
+    return send_file('index.html')
+@app.route('/api/wishlist/<int:wishlist_id>', methods=['DELETE'])
+@login_required
+def remove_from_wishlist(wishlist_id):
+    try:
+        wishlist_item = Wishlist.query.get_or_404(wishlist_id)
+        
+        # Check if the current user owns this wishlist item
+        if wishlist_item.user_id != current_user.id:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        db.session.delete(wishlist_item)
+        db.session.commit()
+        
+        return jsonify({'message': 'Item removed from wishlist successfully'})
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+# Admin Routes
+@app.route('/admin/login', methods=['POST'])
+def admin_login():
+    try:
+        data = request.form
+        email = data.get('email')
+        password = data.get('password')
+
+        if not email or not password:
+            return jsonify({'error': 'Email and password are required'}), 400
+
+        admin = User.query.filter_by(email=email, is_admin=True).first()
+
+        if not admin or not admin.check_password(password):
+            return jsonify({'error': 'Invalid admin credentials'}), 401
+
+        login_user(admin)
+        return jsonify({
+            'message': 'Admin login successful',
+            'admin': {
+                'id': admin.id,
+                'email': admin.email,
+                'full_name': admin.full_name,
+                'is_admin': True
+            }
         })
 
-    rules = [str(rule) for rule in system.symbolic_rules]
-    return jsonify({
-        'success': True,
-        'rules': rules
-    })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/dashboard')
+@login_required
+def admin_dashboard():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    try:
+        users = User.query.all()
+        listings = Listing.query.all()
+        reports = Report.query.all()
+        
+        return jsonify({
+            'users': [{
+                'id': u.id,
+                'email': u.email,
+                'full_name': u.full_name,
+                'college': u.college,
+                'is_verified': u.is_verified,
+                'created_at': u.created_at.isoformat(),
+                'listings_count': len(u.listings)
+            } for u in users],
+            'listings': [{
+                'id': l.id,
+                'title': l.title,
+                'price': l.price,
+                'category': l.category,
+                'seller_id': l.seller_id,
+                'seller_name': l.seller.full_name,
+                'created_at': l.created_at.isoformat(),
+                'is_fake_warning': l.is_fake_warning
+            } for l in listings],
+            'reports': [{
+                'id': r.id,
+                'reporter_name': r.reporter.full_name,
+                'listing_title': r.reported_listing.title if r.reported_listing else 'User Report',
+                'status': r.status,
+                'created_at': r.created_at.isoformat()
+            } for r in reports],
+            'stats': {
+                'total_users': len(users),
+                'total_listings': len(listings),
+                'verified_users': len([u for u in users if u.is_verified]),
+                'fake_warnings': len([l for l in listings if l.is_fake_warning]),
+                'pending_reports': len([r for r in reports if r.status == 'pending']),
+                'total_reports': len(reports)
+            }
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/delete-user/<int:user_id>', methods=['DELETE'])
+@login_required
+def admin_delete_user(user_id):
+    if not current_user.is_admin:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    try:
+        user = User.query.get_or_404(user_id)
+        
+        # Delete user's sent and received messages
+        MessageThread.query.filter(
+            db.or_(
+                MessageThread.sender_id == user_id,
+                MessageThread.receiver_id == user_id
+            )
+        ).delete(synchronize_session='fetch')
+        
+        # Delete user's wishlist items
+        Wishlist.query.filter_by(user_id=user_id).delete()
+        
+        # Delete reports made by this user
+        Report.query.filter_by(reporter_id=user_id).delete()
+        
+        # Delete user's listings
+        user_listings = Listing.query.filter_by(seller_id=user_id).all()
+        for listing in user_listings:
+            # Delete reports about this listing
+            Report.query.filter_by(reported_listing_id=listing.id).delete()
+            
+            # Delete wishlist entries for this listing
+            Wishlist.query.filter_by(listing_id=listing.id).delete()
+            
+            # Delete messages about this listing
+            MessageThread.query.filter_by(listing_id=listing.id).delete()
+            
+            # Delete the listing's image file if it exists
+            if listing.image_url:
+                try:
+                    image_path = os.path.join(app.config['UPLOAD_FOLDER'], listing.image_url.split('/')[-1])
+                    if os.path.exists(image_path):
+                        os.remove(image_path)
+                except Exception as e:
+                    print(f"Error deleting image for listing {listing.id}: {str(e)}")
+            
+            # Delete the listing itself
+            db.session.delete(listing)
+        
+        # Finally delete the user
+        db.session.delete(user)
+        db.session.commit()
+        
+        return jsonify({'message': 'User and their data deleted successfully'})
+    
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error deleting user {user_id}: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/delete-listing/<int:listing_id>', methods=['DELETE'])
+@login_required
+def admin_delete_listing(listing_id):
+    if not current_user.is_admin:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    try:
+        listing = Listing.query.get_or_404(listing_id)
+        
+        # Delete reports about this listing
+        Report.query.filter_by(reported_listing_id=listing_id).delete()
+        
+        # Delete wishlist entries for this listing
+        Wishlist.query.filter_by(listing_id=listing_id).delete()
+        
+        # Delete messages about this listing
+        MessageThread.query.filter_by(listing_id=listing_id).delete()
+        
+        # Delete the listing's image file if it exists
+        if listing.image_url:
+            try:
+                image_path = os.path.join(app.config['UPLOAD_FOLDER'], listing.image_url.split('/')[-1])
+                if os.path.exists(image_path):
+                    os.remove(image_path)
+            except Exception as e:
+                print(f"Error deleting image for listing {listing_id}: {str(e)}")
+        
+        # Delete the listing itself
+        db.session.delete(listing)
+        db.session.commit()
+        
+        return jsonify({'message': 'Listing deleted successfully'})
+    
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error deleting listing {listing_id}: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/toggle-verification/<int:user_id>', methods=['POST'])
+@login_required
+def admin_toggle_verification(user_id):
+    if not current_user.is_admin:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    try:
+        user = User.query.get_or_404(user_id)
+        user.is_verified = not user.is_verified
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'User verification status updated',
+            'is_verified': user.is_verified
+        })
+    
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/toggle-fake-warning/<int:listing_id>', methods=['POST'])
+@login_required
+def admin_toggle_fake_warning(listing_id):
+    if not current_user.is_admin:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    try:
+        listing = Listing.query.get_or_404(listing_id)
+        listing.is_fake_warning = not listing.is_fake_warning
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Fake warning status updated',
+            'is_fake_warning': listing.is_fake_warning
+        })
+    
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+# Add these new routes to app.py
+
+@app.route('/admin/user-details/<int:user_id>')
+@login_required
+def admin_user_details(user_id):
+    if not current_user.is_admin:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    try:
+        user = User.query.get_or_404(user_id)
+        return jsonify({
+            'id': user.id,
+            'email': user.email,
+            'full_name': user.full_name,
+            'department': user.department,
+            'year': user.year,
+            'college': user.college,
+            'profile_picture': user.profile_picture,
+            'is_verified': user.is_verified,
+            'created_at': user.created_at.isoformat(),
+            'listings_count': len(user.listings)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/user-listings/<int:user_id>')
+@login_required
+def admin_user_listings(user_id):
+    if not current_user.is_admin:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    try:
+        listings = Listing.query.filter_by(seller_id=user_id).all()
+        return jsonify([{
+            'id': l.id,
+            'title': l.title,
+            'price': l.price,
+            'image_url': l.image_url,
+            'category': l.category,
+            'condition': l.condition,
+            'created_at': l.created_at.isoformat()
+        } for l in listings])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/listing-details/<int:listing_id>')
+@login_required
+def admin_listing_details(listing_id):
+    if not current_user.is_admin:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    try:
+        listing = Listing.query.get_or_404(listing_id)
+        seller = User.query.get(listing.seller_id)
+        return jsonify({
+            'id': listing.id,
+            'title': listing.title,
+            'description': listing.description,
+            'price': listing.price,
+            'rent_price': listing.rent_price,
+            'category': listing.category,
+            'condition': listing.condition,
+            'image_url': listing.image_url,
+            'created_at': listing.created_at.isoformat(),
+            'seller_id': listing.seller_id,
+            'seller': {
+                'id': seller.id,
+                'full_name': seller.full_name,
+                'email': seller.email
+            },
+            'product_type': listing.product_type,
+            'branch': listing.branch,
+            'study_year': listing.study_year,
+            'working_condition': listing.working_condition,
+            'warranty_status': listing.warranty_status,
+            'subject': listing.subject,
+            'is_fake_warning': listing.is_fake_warning,
+            'is_softcopy': listing.is_softcopy,
+            'file_url': listing.file_url
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# Report Routes
+@app.route('/api/report/create', methods=['POST'])
+@login_required
+def create_report():
+    try:
+        # Process image if provided
+        if 'image' in request.files:
+            image = request.files['image']
+            if image.filename:
+                image_url = save_image(image)
+            else:
+                image_url = None
+        else:
+            image_url = None
+
+        # Description is required
+        description = request.form.get('description')
+        if not description:
+            return jsonify({'error': 'Description is required'}), 400
+
+        # Get IDs
+        listing_id = request.form.get('listing_id')
+        message_thread_id = request.form.get('message_thread_id')
+        
+        # Check if this is a temporary message thread ID
+        is_temp_id = message_thread_id and message_thread_id.startswith('temp_')
+        
+        # For temporary IDs, we don't need an existing message thread
+        if is_temp_id:
+            message_thread_id = None
+        
+        # Require at least one ID or a description
+        if not description:
+            return jsonify({'error': 'Description is required'}), 400
+        
+        # Create the report
+        report = Report(
+            reporter_id=current_user.id,
+            reported_listing_id=listing_id if listing_id else None,
+            message_thread_id=message_thread_id if message_thread_id else None,
+            description=description,
+            image_url=image_url
+        )
+        
+        db.session.add(report)
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Report submitted successfully',
+            'report_id': report.id
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/reports')
+@login_required
+def admin_get_reports():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    try:
+        reports = Report.query.order_by(Report.created_at.desc()).all()
+        reports_data = []
+        
+        for r in reports:
+            report_data = {
+                'id': r.id,
+                'reporter': {
+                    'id': r.reporter.id,
+                    'name': r.reporter.full_name,
+                    'email': r.reporter.email
+                },
+                'description': r.description,
+                'image_url': r.image_url,
+                'status': r.status,
+                'created_at': r.created_at.isoformat()
+            }
+            
+            # Add listing info if available
+            if r.reported_listing_id and r.reported_listing:
+                report_data['listing'] = {
+                    'id': r.reported_listing.id,
+                    'title': r.reported_listing.title
+                }
+            else:
+                report_data['listing'] = None
+                
+            # Add message info if available
+            if r.message_thread_id and r.message_thread:
+                report_data['message'] = {
+                    'id': r.message_thread.id,
+                    'sender_name': r.message_thread.sender.full_name,
+                    'receiver_name': r.message_thread.receiver.full_name
+                }
+            else:
+                report_data['message'] = None
+                
+            reports_data.append(report_data)
+        
+        return jsonify({'reports': reports_data})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/reports/<int:report_id>')
+@login_required
+def admin_get_report_details(report_id):
+    if not current_user.is_admin:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    try:
+        report = Report.query.get_or_404(report_id)
+        response_data = {
+            'id': report.id,
+            'reporter': {
+                'id': report.reporter.id,
+                'name': report.reporter.full_name,
+                'email': report.reporter.email,
+                'college': report.reporter.college
+            },
+            'description': report.description,
+            'image_url': report.image_url,
+            'status': report.status,
+            'created_at': report.created_at.isoformat()
+        }
+        
+        # Add listing info if it exists
+        if report.reported_listing_id and report.reported_listing:
+            response_data['listing'] = {
+                'id': report.reported_listing.id,
+                'title': report.reported_listing.title,
+                'seller': {
+                    'id': report.reported_listing.seller.id,
+                    'name': report.reported_listing.seller.full_name,
+                    'email': report.reported_listing.seller.email
+                }
+            }
+        else:
+            response_data['listing'] = None
+            
+        # Add message thread info if it exists
+        if report.message_thread_id and report.message_thread:
+            response_data['message_thread'] = {
+                'id': report.message_thread.id,
+                'content': report.message_thread.content,
+                'sender': {
+                    'id': report.message_thread.sender.id,
+                    'name': report.message_thread.sender.full_name
+                },
+                'receiver': {
+                    'id': report.message_thread.receiver.id,
+                    'name': report.message_thread.receiver.full_name
+                }
+            }
+        else:
+            response_data['message_thread'] = None
+            
+        return jsonify(response_data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/reports/<int:report_id>/status', methods=['POST'])
+@login_required
+def admin_update_report_status(report_id):
+    if not current_user.is_admin:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    try:
+        report = Report.query.get_or_404(report_id)
+        new_status = request.json.get('status')
+        
+        if new_status not in ['pending', 'reviewed', 'resolved']:
+            return jsonify({'error': 'Invalid status'}), 400
+            
+        report.status = new_status
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Report status updated successfully',
+            'status': report.status
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+# Create admin user on startup
+def create_admin_user():
+    # Check if admin already exists
+    admin = User.query.filter_by(email='admin@edutrade.co.in').first()
+    
+    # Only create admin if it doesn't exist
+    if not admin:
+        admin_user = User(
+            email='admin@edutrade.co.in',
+            full_name='Admin User',
+            department='Admin',
+            year=1,
+            college='Admin College',
+            is_verified=True,
+            is_admin=True
+        )
+        admin_user.set_password('your_admin_password')  # Replace with your actual admin password
+        db.session.add(admin_user)
+        db.session.commit()
+        print("Admin user created successfully")
+    else:
+        print("Admin user already exists")
+
+@app.route('/debug/files/<int:listing_id>')
+@login_required
+def debug_file_paths(listing_id):
+    """Debug route to diagnose file path issues"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Unauthorized'}), 403
+        
+    try:
+        listing = Listing.query.get_or_404(listing_id)
+        result = {
+            'listing_id': listing.id,
+            'title': listing.title,
+            'is_softcopy': listing.is_softcopy,
+            'file_url': listing.file_url,
+            'app_root': app.root_path,
+            'cwd': os.getcwd(),
+            'upload_folder': app.config['UPLOAD_FOLDER'],
+            'paths_checked': []
+        }
+        
+        if listing.is_softcopy and listing.file_url:
+            # Get filename
+            if listing.file_url.startswith('uploads/'):
+                file_name = listing.file_url.split('/')[-1]
+            else:
+                file_name = listing.file_url
+                
+            result['extracted_filename'] = file_name
+            
+            # Check various paths
+            paths_to_check = [
+                os.path.join(app.root_path, 'static', 'uploads', file_name),
+                os.path.join('static', 'uploads', file_name),
+                os.path.join(os.getcwd(), 'static', 'uploads', file_name),
+                os.path.join(app.root_path, 'static', listing.file_url),
+                os.path.join(os.getcwd(), 'static', listing.file_url)
+            ]
+            
+            for path in paths_to_check:
+                exists = os.path.exists(path)
+                result['paths_checked'].append({
+                    'path': path,
+                    'exists': exists,
+                    'is_file': os.path.isfile(path) if exists else False,
+                    'is_dir': os.path.isdir(path) if exists else False,
+                    'size': os.path.getsize(path) if exists and os.path.isfile(path) else None
+                })
+                
+            # List the static/uploads directory to see what's there
+            uploads_dir = os.path.join(app.root_path, 'static', 'uploads')
+            if os.path.exists(uploads_dir):
+                result['uploads_dir_contents'] = os.listdir(uploads_dir)
+            else:
+                result['uploads_dir_contents'] = "Directory not found"
+        
+        return jsonify(result)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/debug/system')
+@login_required
+def debug_system():
+    """Debug route to check system configuration and ensure directories exist"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Unauthorized'}), 403
+        
+    try:
+        result = {
+            'app_info': {
+                'root_path': app.root_path,
+                'static_folder': app.static_folder,
+                'upload_folder_config': app.config['UPLOAD_FOLDER'],
+                'current_directory': os.getcwd()
+            },
+            'directories': {},
+            'actions_taken': []
+        }
+        
+        # Check and create necessary directories
+        directories_to_check = [
+            app.config['UPLOAD_FOLDER'],
+            os.path.join(app.root_path, 'static', 'uploads'),
+            os.path.join('static', 'uploads'),
+        ]
+        
+        for directory in directories_to_check:
+            exists = os.path.exists(directory)
+            is_dir = os.path.isdir(directory) if exists else False
+            
+            result['directories'][directory] = {
+                'exists': exists,
+                'is_directory': is_dir
+            }
+            
+            # Create the directory if it doesn't exist
+            if not exists:
+                try:
+                    os.makedirs(directory, exist_ok=True)
+                    result['actions_taken'].append(f"Created directory: {directory}")
+                    result['directories'][directory]['exists'] = True
+                    result['directories'][directory]['is_directory'] = True
+                except Exception as e:
+                    result['actions_taken'].append(f"Failed to create {directory}: {str(e)}")
+        
+        # Run the path fixing code directly
+        try:
+            listings = Listing.query.filter(Listing.is_softcopy == True).filter(Listing.file_url.isnot(None)).all()
+            updated_count = 0
+            
+            for listing in listings:
+                if listing.file_url and listing.file_url.startswith('uploads/'):
+                    # Get just the filename
+                    filename = listing.file_url.split('/')[-1]
+                    result['actions_taken'].append(f"Fixing path for listing #{listing.id}: {listing.file_url} -> {filename}")
+                    listing.file_url = filename
+                    updated_count += 1
+            
+            if updated_count > 0:
+                db.session.commit()
+                result['actions_taken'].append(f"Fixed {updated_count} file paths in database")
+            else:
+                result['actions_taken'].append("No file paths needed fixing in database")
+        except Exception as e:
+            db.session.rollback()
+            result['actions_taken'].append(f"Error fixing file paths: {str(e)}")
+        
+        return jsonify(result)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/download/<int:listing_id>')
+@login_required
+def download_file(listing_id):
+    """Download a softcopy file"""
+    try:
+        # Get the listing
+        listing = Listing.query.get_or_404(listing_id)
+        print(f"\n\n===== DOWNLOAD REQUEST for listing ID: {listing_id} =====")
+        print(f"Listing info: {listing.title}, is_softcopy: {listing.is_softcopy}, file_url: {listing.file_url}")
+        
+        # Check if it's a softcopy
+        if not listing.is_softcopy:
+            print(f"Listing {listing_id} is not a softcopy")
+            abort(404)
+            
+        # Get the filename from file_url
+        file_url = listing.file_url
+        if not file_url:
+            print(f"Listing {listing_id} has no file_url")
+            abort(404)
+            
+        # Extract just the filename regardless of format
+        if '/' in file_url:
+            file_name = file_url.split('/')[-1] 
+        else:
+            file_name = file_url
+            
+        print(f"Looking for file: {file_name}")
+        
+        # Check for working files to find the correct directory
+        test_filenames = [
+            "2881bee4-a0ee-4efe-ae76-4dd654b79429_NLP_Exam_Preparation_Topics.pdf",
+            "603f8fa0-0fa4-4295-a383-81dd385778e2_N_L_RAM_CHARAN_TEJA.pdf"
+        ]
+        
+        working_file_paths = []
+        for test_file in test_filenames:
+            possible_locations = [
+                os.path.join(app.root_path, 'static', 'uploads', test_file),
+                os.path.join(os.getcwd(), 'static', 'uploads', test_file),
+                os.path.join('static', 'uploads', test_file)
+            ]
+            
+            for location in possible_locations:
+                if os.path.exists(location):
+                    working_file_paths.append(location)
+                    
+        if working_file_paths:
+            print(f"Found working files at: {working_file_paths}")
+            working_dir = os.path.dirname(working_file_paths[0])
+            print(f"Using working directory: {working_dir}")
+            file_path = os.path.join(working_dir, file_name)
+            print(f"Checking for file at: {file_path}")
+            if os.path.exists(file_path):
+                print(f"File found at working directory path: {file_path}")
+                
+                # Get the file extension for MIME type
+                _, file_ext = os.path.splitext(file_path)
+                file_ext = file_ext.lower()
+                
+                # Set the appropriate MIME type
+                if file_ext == '.pdf':
+                    mimetype = 'application/pdf'
+                elif file_ext == '.doc':
+                    mimetype = 'application/msword'
+                elif file_ext == '.docx':
+                    mimetype = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                elif file_ext == '.txt':
+                    mimetype = 'text/plain'
+                elif file_ext in ['.ppt', '.pptx']:
+                    mimetype = 'application/vnd.ms-powerpoint'
+                elif file_ext in ['.xls', '.xlsx']:
+                    mimetype = 'application/vnd.ms-excel'
+                else:
+                    mimetype = 'application/octet-stream'
+                    
+                # Download the file
+                download_name = f"{secure_filename(listing.title)}{file_ext}"
+                print(f"Sending file {file_path} as {download_name} with mimetype {mimetype}")
+                
+                return send_file(
+                    file_path,
+                    as_attachment=True,
+                    download_name=download_name,
+                    mimetype=mimetype
+                )
+        
+        # Try all possible locations if working directory approach failed
+        print("Working directory approach failed, trying all possible paths")
+        
+        # Search in multiple locations
+        possible_paths = [
+            os.path.join(app.root_path, 'static', 'uploads', file_name),
+            os.path.join(os.getcwd(), 'static', 'uploads', file_name),
+            os.path.join('static', 'uploads', file_name),
+            os.path.join(app.root_path, 'static', file_url),
+            os.path.join(os.getcwd(), 'static', file_url)
+        ]
+        
+        print(f"Trying paths: {possible_paths}")
+        
+        file_path = None
+        for path in possible_paths:
+            print(f"Checking: {path}")
+            if os.path.exists(path):
+                file_path = path
+                print(f"Found at: {file_path}")
+                break
+        
+        if not file_path:
+            # If still not found, search recursively
+            print("File not found in standard paths, searching recursively")
+            
+            search_dirs = [
+                os.path.join(app.root_path, 'static'),
+                os.path.join(os.getcwd(), 'static')
+            ]
+            
+            for search_dir in search_dirs:
+                if os.path.exists(search_dir):
+                    print(f"Searching directory: {search_dir}")
+                    for root, dirs, files in os.walk(search_dir):
+                        if file_name in files:
+                            file_path = os.path.join(root, file_name)
+                            print(f"Found through recursive search: {file_path}")
+                            break
+                if file_path:
+                    break
+        
+        if not file_path:
+            print("File not found after exhaustive search")
+            abort(404)
+        
+        # Get the file extension for MIME type
+        _, file_ext = os.path.splitext(file_path)
+        file_ext = file_ext.lower()
+        
+        # Set the appropriate MIME type
+        if file_ext == '.pdf':
+            mimetype = 'application/pdf'
+        elif file_ext == '.doc':
+            mimetype = 'application/msword'
+        elif file_ext == '.docx':
+            mimetype = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        elif file_ext == '.txt':
+            mimetype = 'text/plain'
+        elif file_ext in ['.ppt', '.pptx']:
+            mimetype = 'application/vnd.ms-powerpoint'
+        elif file_ext in ['.xls', '.xlsx']:
+            mimetype = 'application/vnd.ms-excel'
+        else:
+            mimetype = 'application/octet-stream'
+            
+        # Download the file
+        download_name = f"{secure_filename(listing.title)}{file_ext}"
+        print(f"Sending file {file_path} as {download_name} with mimetype {mimetype}")
+        
+        return send_file(
+            file_path,
+            as_attachment=True,
+            download_name=download_name,
+            mimetype=mimetype
+        )
+    
+    except Exception as e:
+        print(f"Error in download_file: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        abort(500)
+
+@app.route('/debug/dirs')
+def debug_directories():
+    """Debug route to show directory structure"""
+    try:
+        result = {
+            "app_info": {
+                "root_path": app.root_path,
+                "static_folder": app.static_folder,
+                "upload_folder_config": app.config['UPLOAD_FOLDER'],
+                "current_directory": os.getcwd()
+            },
+            "directory_tree": {}
+        }
+        
+        # Check key directories
+        key_dirs = [
+            os.path.join(app.root_path, 'static'),
+            os.path.join(app.root_path, 'static', 'uploads'),
+            app.config['UPLOAD_FOLDER'],
+            os.path.join(os.getcwd(), 'static'),
+            os.path.join(os.getcwd(), 'static', 'uploads')
+        ]
+        
+        # Check if directories exist and list their contents
+        for directory in key_dirs:
+            if os.path.exists(directory):
+                result["directory_tree"][directory] = {
+                    "exists": True,
+                    "is_dir": os.path.isdir(directory),
+                    "contents": os.listdir(directory) if os.path.isdir(directory) else None
+                }
+            else:
+                result["directory_tree"][directory] = {
+                    "exists": False
+                }
+        
+        # Also list all softcopy listings
+        with app.app_context():
+            result["softcopy_listings"] = [
+                {
+                    "id": l.id,
+                    "title": l.title,
+                    "file_url": l.file_url,
+                    "created_at": l.created_at.isoformat() if l.created_at else None
+                }
+                for l in Listing.query.filter_by(is_softcopy=True).all()
+            ]
+        
+        return jsonify(result)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/debug/fix-file/<int:listing_id>')
+@login_required
+def debug_fix_file(listing_id):
+    """Debug route to fix a file location for a specific listing"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Unauthorized'}), 403
+        
+    try:
+        result = {
+            "listing_id": listing_id,
+            "actions": []
+        }
+        
+        # Find the listing
+        listing = Listing.query.get_or_404(listing_id)
+        result["listing_info"] = {
+            "id": listing.id,
+            "title": listing.title,
+            "is_softcopy": listing.is_softcopy,
+            "file_url": listing.file_url
+        }
+        
+        if not listing.is_softcopy or not listing.file_url:
+            return jsonify({"error": "Listing is not a softcopy or has no file URL"}), 400
+        
+        # Get filenames
+        if '/' in listing.file_url:
+            file_name = listing.file_url.split('/')[-1]
+            result["actions"].append(f"Extracted filename {file_name} from {listing.file_url}")
+            
+            # Update the database to store just the filename
+            old_file_url = listing.file_url
+            listing.file_url = file_name
+            db.session.commit()
+            result["actions"].append(f"Updated database entry from {old_file_url} to {file_name}")
+        else:
+            file_name = listing.file_url
+        
+        # Find the file
+        file_found = False
+        found_path = None
+        
+        # List of places to look for the file
+        search_locations = [
+            app.root_path,
+            os.getcwd(),
+            os.path.join(app.root_path, 'static'),
+            os.path.join(os.getcwd(), 'static')
+        ]
+        
+        # Search for the file
+        for location in search_locations:
+            for root, dirs, files in os.walk(location):
+                if file_name in files:
+                    found_path = os.path.join(root, file_name)
+                    file_found = True
+                    result["actions"].append(f"Found file at {found_path}")
+                    break
+            if file_found:
+                break
+        
+        if not file_found:
+            result["actions"].append(f"File not found in any location")
+            return jsonify(result), 404
+        
+        # Ensure target directory exists
+        target_dir = os.path.join(app.root_path, 'static', 'uploads')
+        os.makedirs(target_dir, exist_ok=True)
+        result["actions"].append(f"Ensured target directory exists: {target_dir}")
+        
+        # Copy the file to the target location if it's not already there
+        target_path = os.path.join(target_dir, file_name)
+        if os.path.abspath(found_path) != os.path.abspath(target_path):
+            import shutil
+            shutil.copy2(found_path, target_path)
+            result["actions"].append(f"Copied file from {found_path} to {target_path}")
+            
+            # Verify the copy was successful
+            if os.path.exists(target_path):
+                result["actions"].append(f"Verified file exists at target location")
+                result["success"] = True
+            else:
+                result["actions"].append(f"Failed to copy file to target location")
+                result["success"] = False
+        else:
+            result["actions"].append(f"File is already in the correct location")
+            result["success"] = True
+        
+        return jsonify(result)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/cofundersprofiles.html')
+def cofounders_profile():
+    return send_file('cofundersprofiles.html')
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    with app.app_context():
+        db.create_all()
+        create_admin_user()
+    app.run(host="0.0.0.0", port=80, debug=False)
+HTML_TEMPLATE='''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StudentsMart - College Marketplace</title>
+    <!-- Add modern dependencies -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11.0.19/dist/sweetalert2.min.css">
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --secondary-color: #3b82f6;
+            --accent-color: #60a5fa;
+            --success-color: #22c55e;
+            --error-color: #ef4444;
+            --text-dark: #1f2937;
+            --text-light: #6b7280;
+            --background-light: #f3f4f6;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--background-light);
+            color: var(--text-dark);
+        }
+
+        .navbar {
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .navbar-brand {
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+
+        .hero-section {
+            background: linear-gradient(rgba(37,99,235,0.9), rgba(59,130,246,0.9));
+            background-image: ('/static/images/hero-bg.jpg');
+            background-size: cover;
+            color: white;
+            padding: 4rem 0;
+            margin-bottom: 2rem;
+        }
+
+        .auth-card {
+            background: white;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .form-control, .form-select {
+            border-radius: 0.5rem;
+            padding: 0.75rem 1rem;
+            border: 1px solid #e5e7eb;
+        }
+
+        .form-control:focus, .form-select:focus {
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 3px rgba(96,165,250,0.2);
+        }
+
+        .btn-primary {
+            background-color: var(--primary-color);
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+        }
+
+        .btn-primary:hover {
+            background-color: var(--secondary-color);
+        }
+
+        .listing-card {
+            background: white;
+            border-radius: 1rem;
+            overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s;
+            height: 100%;
+        }
+
+        .listing-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+        }
+
+        .listing-image {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+        }
+
+        .listing-content {
+            padding: 1.5rem;
+        }
+
+        .price-tag {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+
+        .search-section {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+
+        .modal-content {
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .badge {
+            padding: 0.5rem 1rem;
+            border-radius: 2rem;
+            font-weight: 600;
+        }
+
+        .skeleton-loading {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+        }
+
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .hero-section {
+                padding: 2rem 0;
+            }
+            
+            .auth-card {
+                margin: 1rem;
+            }
+        }
+        /* Add these to your existing style section */
+        .hero-section {
+            background: linear-gradient(rgba(211, 213, 216, 0.9), rgba(59,130,246,0.9));
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            padding: 4rem 0;
+        }
+
+        .choice-card {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 1rem;
+            padding: 2rem;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .choice-card:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-5px);
+        }
+
+        .choice-card h3 {
+            margin: 1rem 0;
+        }
+
+        .choice-card p {
+            opacity: 0.9;
+        }
+        .admin-dashboard .card {
+            margin-bottom: 1rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .admin-dashboard .card-header {
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .admin-dashboard .list-group-item {
+            border-left: none;
+            border-right: none;
+        }
+        
+        .admin-dashboard .list-group-item:first-child {
+            border-top: none;
+        }
+        
+        .admin-dashboard .list-group-item:last-child {
+            border-bottom: none;
+        }
+        /* WhatsApp-style Chat Interface */
+        /* WhatsApp-style Chat Interface */
+        .chat-container {
+            height: 80vh;
+            overflow: hidden;
+        }
+
+        .chat-sidebar {
+            border-right: 1px solid #e0e0e0;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-sidebar-header {
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .chat-list {
+            overflow-y: auto;
+            flex-grow: 1;
+        }
+
+        .chat-item {
+            padding: 10px 15px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .chat-item:hover {
+            background-color: #f5f5f5;
+        }
+
+        .chat-window {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .chat-header {
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .chat-messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background-color: #e5ddd5;
+        }
+
+        .message {
+            max-width: 65%;
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            border-radius: 7.5px;
+            position: relative;
+        }
+
+        .message.sent {
+            background-color: #dcf8c6;
+            margin-left: auto;
+            border-top-right-radius: 0;
+        }
+
+        .message.received {
+            background-color: white;
+            margin-right: auto;
+            border-top-left-radius: 0;
+        }
+
+        .message-time {
+            font-size: 0.75rem;
+            color: #999;
+            margin-top: 5px;
+            text-align: right;
+        }
+
+        .chat-input {
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .user-avatar img {
+            width: 40px;
+            height: 40px;
+            object-fit: cover;
+        }
+
+        .search-box {
+            padding: 10px;
+            background-color: white;
+        }
+
+        .search-box input {
+            background-color: #f0f0f0;
+            border: none;
+            border-radius: 20px;
+            padding: 8px 15px;
+        }
+        .message {
+            max-width: 65%;
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            border-radius: 7.5px;
+            position: relative;
+            word-wrap: break-word;
+        }
+        
+        .message.sent {
+            background-color: #dcf8c6;
+            margin-left: auto;
+            margin-right: 10px;
+            border-top-right-radius: 0;
+        }
+        
+        .message.received {
+            background-color: white;
+            margin-right: auto;
+            margin-left: 10px;
+            border-top-left-radius: 0;
+        }
+        
+        .message-time {
+            font-size: 0.75rem;
+            color: #999;
+            margin-top: 5px;
+            text-align: right;
+        }
+        
+        .chat-messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background-color: #e5ddd5;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background-color: #e5ddd5;
+            display: flex;
+            flex-direction: column;
+            height: calc(80vh - 130px); /* Adjust height to prevent overflow */
+            scroll-behavior: smooth;
+        }
+        
+        .message-container {
+            display: flex;
+            flex-direction: column;
+            min-height: min-content;
+        }
+        
+        .chat-input {
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-top: 1px solid #e0e0e0;
+            position: sticky;
+            bottom: 0;
+            z-index: 1;
+        }
+        
+        /* Add smooth scrolling to the chat container */
+        .chat-container {
+            height: 80vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        /* Additional Chat Styles */
+        .chat-empty-state {
+            text-align: center;
+            color: #6c757d;
+            padding: 2rem;
+        }
+
+        .chat-content {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .empty-chat-list {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .chat-actions button {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .chat-sidebar-header {
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        .search-box .input-group {
+            background-color: #fff;
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        .search-box input:focus {
+            box-shadow: none;
+        }
+
+        .chat-list {
+            height: calc(80vh - 140px);
+            overflow-y: auto;
+        }
+
+        .chat-item {
+            padding: 12px 15px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .chat-item:hover {
+            background-color: #f8f9fa;
+        }
+
+        .chat-item.active {
+            background-color: #e9ecef;
+        }
+
+        .message {
+            max-width: 75%;
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            border-radius: 12px;
+            position: relative;
+            word-wrap: break-word;
+        }
+
+        .message.sent {
+            background-color: #dcf8c6;
+            margin-left: auto;
+            margin-right: 10px;
+            border-top-right-radius: 4px;
+        }
+
+        .message.received {
+            background-color: white;
+            margin-right: auto;
+            margin-left: 10px;
+            border-top-left-radius: 4px;
+        }
+
+        .message-time {
+            font-size: 0.7rem;
+            color: #999;
+            margin-top: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 4px;
+        }
+
+        .online-status {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .online-status::before {
+            content: '';
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background-color: #22c55e;
+            border-radius: 50%;
+        }
+
+        #messageInput {
+            border-radius: 20px;
+            padding-left: 1rem;
+            padding-right: 1rem;
+            border: 1px solid #e0e0e0;
+        }
+
+        #messageInput:focus {
+            box-shadow: none;
+            border-color: #3b82f6;
+        }
+
+        #sendMessage {
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-left: 8px;
+        }
+
+        #sendMessage:disabled {
+            background-color: #e0e0e0;
+            border-color: #e0e0e0;
+        }
+
+        .user-avatar {
+            position: relative;
+        }
+
+        .user-avatar img {
+            width: 40px;
+            height: 40px;
+            object-fit: cover;
+            border-radius: 50%;
+        }
+        /* Update modal size */
+        .modal-dialog.modal-lg {
+            max-width: 90vw; /* Makes modal wider */
+            height: 90vh; /* Makes modal taller */
+            margin: 5vh auto; /* Centers the modal with equal margins */
+        }
+
+        .chat-container {
+            height: 90vh; /* Makes the container taller */
+        }
+
+        .chat-list {
+            height: calc(90vh - 140px); /* Adjust chat list height */
+        }
+
+        .chat-messages {
+            height: calc(90vh - 180px); /* Adjust messages container height */
+        }
+
+        /* Ensure the chat window fills the available space */
+        .chat-window {
+            height: 90vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-empty-state {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: white;
+            z-index: 1;
+        }
+        
+        .chat-content {
+            position: relative;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            z-index: 2;
+        }
+        
+        .chat-window {
+            position: relative;
+            height: 90vh;
+            overflow: hidden;
+        }
+
+        /* Update the chat content styles */
+        .chat-content {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        /* Modal and Container Styles */
+        .modal-dialog.modal-lg {
+            max-width: 90vw;
+            height: 90vh;
+            margin: 5vh auto;
+        }
+
+        .chat-container {
+            height: 90vh;
+            overflow: hidden;
+        }
+
+        /* Sidebar Styles */
+        .chat-sidebar {
+            border-right: 1px solid #e0e0e0;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-sidebar-header {
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        .chat-list {
+            height: calc(90vh - 140px);
+            overflow-y: auto;
+        }
+
+        .chat-item {
+            padding: 12px 15px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .chat-item:hover {
+            background-color: #f8f9fa;
+        }
+
+        .chat-item.active {
+            background-color: #e9ecef;
+        }
+
+        /* Search Box Styles */
+        .search-box {
+            padding: 10px;
+            background-color: white;
+        }
+
+        .search-box .input-group {
+            background-color: #f0f0f0;
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        .search-box input {
+            border: none;
+            background-color: transparent;
+        }
+
+        .search-box input:focus {
+            box-shadow: none;
+            background-color: transparent;
+        }
+
+        /* Chat Window Styles */
+        .chat-window {
+            height: 90vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-empty-state {
+            text-align: center;
+            color: #6c757d;
+            padding: 2rem;
+        }
+
+        .chat-content {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .chat-header {
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 10px;
+        }
+
+        /* Messages Container Styles */
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background-color: #e5ddd5;
+            height: calc(90vh - 140px);
+        }
+
+        .message-container {
+            min-height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Message Styles */
+        .message {
+            max-width: 75%;
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            border-radius: 12px;
+            position: relative;
+            word-wrap: break-word;
+        }
+
+        .message.sent {
+            background-color: #dcf8c6;
+            margin-left: auto;
+            margin-right: 10px;
+            border-top-right-radius: 4px;
+        }
+
+        .message.received {
+            background-color: white;
+            margin-right: auto;
+            margin-left: 10px;
+            border-top-left-radius: 4px;
+        }
+
+        .message-time {
+            font-size: 0.7rem;
+            color: #999;
+            margin-top: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 4px;
+        }
+
+        /* Chat Input Styles */
+        .chat-input {
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-top: 1px solid #e0e0e0;
+            position: sticky;
+            bottom: 0;
+        }
+
+        #messageInput {
+            border-radius: 20px;
+            padding-left: 1rem;
+            padding-right: 1rem;
+            border: 1px solid #e0e0e0;
+        }
+
+        #messageInput:focus {
+            box-shadow: none;
+            border-color: #3b82f6;
+        }
+
+        #sendMessage {
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-left: 8px;
+        }
+
+        #sendMessage:disabled {
+            background-color: #e0e0e0;
+            border-color: #e0e0e0;
+        }
+
+        /* User Avatar Styles */
+        .user-avatar {
+            position: relative;
+        }
+
+        .user-avatar img {
+            width: 40px;
+            height: 40px;
+            object-fit: cover;
+            border-radius: 50%;
+        }
+
+        /* Online Status Styles */
+        .online-status {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .online-status::before {
+            content: '';
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background-color: #22c55e;
+            border-radius: 50%;
+        }
+
+        /* Scroll Button Styles */
+        #scrollBottom {
+            width: 40px;
+            height: 40px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            transition: opacity 0.3s;
+            position: absolute;
+            bottom: 80px;
+            right: 20px;
+            z-index: 1000;
+            display: none;
+        }
+
+        #scrollBottom:hover {
+            opacity: 0.8;
+        }
+
+        /* Responsive Adjustments */
+        @media (max-width: 768px) {
+            .modal-dialog.modal-lg {
+                max-width: 100vw;
+                margin: 0;
+                height: 100vh;
+            }
+
+            .chat-container {
+                height: 100vh;
+            }
+
+            .chat-messages {
+                height: calc(100vh - 140px);
+            }
+
+            .chat-list {
+                height: calc(100vh - 140px);
+            }
+        }
+
+        /* Report Modal Styles */
+        .report-modal .modal-content {
+            border-radius: 15px;
+            position: relative;
+            z-index: 1050;
+        }
+
+        .report-modal .modal-header {
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .report-modal .modal-body {
+            position: relative;
+            z-index: 1051;
+        }
+
+        .report-form {
+            padding: 1rem;
+            position: relative;
+            z-index: 1052;
+        }
+
+        .report-form textarea.form-control {
+            position: relative;
+            z-index: 1053;
+            background: #fff;
+            pointer-events: auto !important;
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .report-preview-image {
+            max-width: 100%;
+            max-height: 200px;
+            object-fit: contain;
+            margin-top: 1rem;
+        }
+        /* Footer Styles */
+        footer {
+            background: linear-gradient(135deg, #1e3a8a, #1e40af);
+        }
+
+        footer a {
+            transition: color 0.3s ease;
+        }
+
+        footer a:hover {
+            color: var(--accent-color) !important;
+            text-decoration: underline !important;
+        }
+
+        footer .social-icons a {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background-color: rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        footer .social-icons a:hover {
+            background-color: var(--primary-color);
+            transform: translateY(-3px);
+        }
+
+        /* Modal Team Styles */
+        .team-member-img {
+            width: 120px;
+            height: 120px;
+            object-fit: cover;
+            border: 3px solid var(--primary-color);
+        }
+
+        /* Responsive Footer */
+        @media (max-width: 768px) {
+            footer .col-md-4, 
+            footer .col-md-2, 
+            footer .col-md-3 {
+                margin-bottom: 1.5rem;
+            }
+            
+            footer .text-md-start, 
+            footer .text-md-end {
+                text-align: center !important;
+            }
+        }
+        /* Soft Copy Badge Styling */
+        .position-relative {
+            position: relative !important;
+        }
+        
+        .position-absolute {
+            position: absolute !important;
+        }
+        
+        .top-0 {
+            top: 0 !important;
+        }
+        
+        .start-0 {
+            left: 0 !important;
+        }
+        
+        /* Download Button Styling */
+        .btn-success {
+            background-color: #22c55e !important;
+            color: white !important;
+            transition: all 0.2s ease;
+        }
+        
+        .btn-success:hover {
+            background-color: #16a34a !important;
+            transform: translateY(-1px);
+        }
+        
+        /* Listing Card Adjustments */
+        .listing-card {
+            position: relative;
+            overflow: visible !important; /* Changed from overflow: hidden */
+        }
+        
+        .listing-image-container {
+            position: relative;
+            overflow: hidden;
+            border-radius: 1rem 1rem 0 0;
+        }
+        
+        /* Badge Styling */
+        .badge.bg-info {
+            background-color: #3b82f6 !important;
+            font-size: 0.8rem;
+            padding: 0.5rem 0.8rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        /* Button Container Spacing */
+        .d-grid.gap-2 {
+            gap: 0.8rem !important;
+            margin-top: 1rem;
+        }
+        
+        /* Ensure buttons stay visible */
+        .listing-content {
+            position: relative;
+            z-index: 1;
+            background: white;
+            border-radius: 0 0 1rem 1rem;
+        }
+        /* Soft Copy Styles */
+        .position-relative { position: relative; }
+        .position-absolute { position: absolute; }
+        .top-0 { top: 0; }
+        .start-0 { left: 0; }
+
+        .listing-image-container {
+            overflow: visible;
+            border-radius: 12px 12px 0 0;
+        }
+
+        /* Download Button */
+        .btn-success {
+            background-color: #22c55e;
+            border-color: #16a34a;
+            transition: all 0.2s ease;
+        }
+
+        .btn-success:hover {
+            background-color: #16a34a;
+            transform: translateY(-1px);
+        }
+
+        /* Badge Styling */
+        .badge.bg-info {
+            background-color: #3b82f6 !important;
+            font-size: 0.8rem;
+            padding: 0.5rem 0.8rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        /* Button Container */
+        .d-grid.gap-2 {
+            gap: 0.8rem !important;
+            margin-top: 1rem;
+        }
+
+        /* Ensure content visibility */
+        .listing-content {
+            position: relative;
+            z-index: 1;
+            background: white;
+            border-radius: 0 0 12px 12px;
+            padding: 1.25rem;
+        }
+
+        /* Image Styling */
+        .listing-image {
+            height: 200px;
+            object-fit: cover;
+            width: 100%;
+            border-radius: 12px 12px 0 0;
+        }
+        /* Add this to your style section */
+        .faculty-badge .badge {
+            font-size: 0.85rem;
+            padding: 0.5rem;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .faculty-badge .badge i {
+            margin-right: 0.25rem;
+        }
+    </style>
+</head>
+<body>
+    
+    <!-- Enhanced Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-light sticky-top">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-graduation-cap me-2"></i>StudentsMart
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item dropdown d-none" id="adminMenu">
+                        <a class="nav-link" href="#" onclick="showAdminDashboard()">
+                            <i class="fas fa-tools me-2"></i>Admin Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item d-none" id="reportsMenu">
+                        <a class="nav-link" href="#" onclick="showAdminDashboard('reports')">
+                            <i class="fas fa-flag me-2"></i>Reports
+                            <span class="badge bg-danger" id="navReportsBadge">0</span>
+                        </a>
+                    </li>
+                    <li class="nav-item" id="authButtons">
+                        <button class="btn btn-outline-primary me-2" onclick="showLoginModal()">
+                            <i class="fas fa-sign-in-alt me-2"></i>Login
+                        </button>
+                        <button class="btn btn-primary" onclick="showRegisterModal()">
+                            <i class="fas fa-user-plus me-2"></i>Register
+                        </button>
+                    </li>
+                    
+                    
+                    
+                    
+                    <li class="nav-item dropdown d-none" id="userMenu">
+                        <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="fas fa-user-circle me-2"></i><span id="userName"></span>
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#" onclick="showMyListings()">
+                                <i class="fas fa-list me-2"></i>My Listings
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" onclick="showWishlist()">
+                                <i class="fas fa-heart me-2"></i>Wishlist
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" onclick="showMessages()">
+                                <i class="fas fa-envelope me-2"></i>Messages
+                            </a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="#" onclick="logout()">
+                                <i class="fas fa-sign-out-alt me-2"></i>Logout
+                            </a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero-section text-center">
+        <div class="container">
+            <h1 class="display-4 mb-4">The Fastest Campus Service Provider</h1>
+            <p class="lead mb-4">Your one-stop marketplace for college essentials</p>
+            <div class="row justify-content-center mt-5">
+                <div class="col-md-4">
+                    <div class="choice-card" onclick="handlePathSelection('buy')">
+                        <i class="fas fa-shopping-cart fa-3x mb-3"></i>
+                        <h3>Buy Items</h3>
+                        <p>Browse and purchase items from other students</p>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="choice-card" onclick="handlePathSelection('sell')">
+                        <i class="fas fa-store fa-3x mb-3"></i>
+                        <h3>Sell/Rent Items</h3>
+                        <p>List your items for sale or rent</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    <div class="container">
+        <div class="search-section">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="fas fa-search"></i></span>
+                        <input type="text" class="form-control" id="searchInput" placeholder="Search items...">
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select" id="collegeFilter">
+                        <option value="">All Colleges</option>
+                        <!-- Options will be populated by JavaScript -->
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select" id="categoryFilter">
+                        <option value="">All Categories</option>
+                        <option value="electronic">Electronic</option>
+                        <option value="books">Books</option>
+                        <option value="clothes">Clothes</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select" id="sortFilter">
+                        <option value="newest">Newest First</option>
+                        <option value="price_low">Price: Low to High</option>
+                        <option value="price_high">Price: High to Low</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <div class="row g-4" id="listingsGrid">
+            <!-- Listings will be dynamically added here -->
+        </div>
+
+        <!-- Loading Skeleton -->
+        <div class="row g-4" id="loadingSkeleton" style="display: none;">
+            <!-- Skeleton cards will be added here -->
+        </div>
+    </div>
+    <div id="listingsSection" style="display: none;">
+        <!-- Your existing search-section and listings grid will go here -->
+        <div class="container">
+            <div class="search-section">
+                <!-- Your existing search section content -->
+            </div>
+            <div class="row g-4" id="listingsGrid">
+                <!-- Listings will be dynamically added here -->
+            </div>
+        </div>
+    </div>
+    <div class="modal fade" id="adminLoginModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Admin Login</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="adminLoginForm">
+                        <div class="mb-3">
+                            <label class="form-label">Email</label>
+                            <input type="email" class="form-control" name="email" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Password</label>
+                            <input type="password" class="form-control" name="password" required>
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-lock me-2"></i>Admin Login
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    
+
+    <!-- Search Section -->
+    
+
+        <!-- Listings Grid -->
+        
+
+    <!-- Modals -->
+    <!-- Login Modal -->
+    <div class="modal fade" id="loginModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Login to StudentsMart</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="loginForm">
+                        <div class="mb-3">
+                            <label class="form-label">Email</label>
+                            <input type="email" class="form-control" name="email" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Password</label>
+                            <input type="password" class="form-control" name="password" required>
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-sign-in-alt me-2"></i>Login
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Register Modal -->
+    <div class="modal fade" id="registerModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create Account</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="registerForm">
+                        <div class="mb-3">
+                            <label class="form-label">Email</label>
+                            <input type="email" class="form-control" name="email" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Full Name</label>
+                            <input type="text" class="form-control" name="full_name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Department</label>
+                            <input type="text" class="form-control" name="department" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Year</label>
+                            <select class="form-select" name="year" required>
+                                <option value="">Select Year</option>
+                                <option value="1">1st Year</option>
+                                <option value="2">2nd Year</option>
+                                <option value="3">3rd Year</option>
+                                <option value="4">4th Year</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">College</label>
+                            <select class="form-select" name="college" id="collegeSelect" required>
+                                <option value="">Select Your College</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Password</label>
+                            <input type="password" class="form-control" name="password" required>
+                        </div>
+                        <!-- Inside your registerModal, just before the register button -->
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="acceptTerms" required>
+                            <label class="form-check-label" for="acceptTerms">
+                                I agree to the <a href="#" onclick="showTermsModal()">Terms and Conditions</a> and understand that:
+                            </label>
+                            <div class="terms-summary mt-2 small">
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check-circle text-primary me-2"></i>My listings must be fair and accurate</li>
+                                    <li><i class="fas fa-check-circle text-primary me-2"></i>Violations may result in permanent account suspension</li>
+                                    <li><i class="fas fa-check-circle text-primary me-2"></i>I will maintain privacy of other users</li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-user-plus me-2"></i>Register
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Listing Modal -->
+    <!-- Create Listing Modal -->
+<!-- Create Listing Modal -->
+    <div class="modal fade" id="createListingModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create New Listing</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="createListingForm" enctype="multipart/form-data">
+                        <div class="row g-3">
+                            <!-- Category Selection -->
+                            <div class="col-md-6">
+                                <label class="form-label">Category</label>
+                                <select class="form-select" name="category" id="listingCategory" required>
+                                    <option value="">Select Category</option>
+                                    <option value="electronic">Electronic</option>
+                                    <option value="books">Books</option>
+                                    <option value="clothes">Clothes</option>
+                                </select>
+                            </div>
+
+                            <!-- Product Type -->
+                            <div class="col-md-6">
+                                <label class="form-label">Product Type</label>
+                                <select class="form-select" name="product_type" id="productType" required>
+                                    <option value="">Select Product Type</option>
+                                </select>
+                            </div>
+
+                            <!-- Title -->
+                            <div class="col-12">
+                                <label class="form-label">Title</label>
+                                <input type="text" class="form-control" name="title" required>
+                            </div>
+                            <div class="col-md-6 field-branch" style="display: none;">
+                                <label class="form-label">Branch</label>
+                                <select class="form-select" name="branch">
+                                    <option value="">Select Branch</option>
+                                    <option value="CSE">CSE</option>
+                                    <option value="ECE">ECE</option>
+                                    <option value="EEE">EEE</option>
+                                    <option value="MECH">MECH</option>
+                                    <option value="CIVIL">CIVIL</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 field-faculty" style="display: none;">
+                                <label class="form-label">Faculty Name</label>
+                                <input type="text" class="form-control" name="faculty_name" placeholder="Enter faculty name">
+                            </div>
+                            <div class="col-md-6 field-subject" style="display: none;">
+                                <label class="form-label">Subject</label>
+                                <input type="text" class="form-control" name="subject">
+                            </div>
+                            <!-- Add this to your Create Listing form, near the other property details -->
+                            <!-- Add this to your Create Listing form -->
+                            <!-- Add this to your Create Listing form, near the other property details -->
+                            <div class="col-md-6">
+                                <label for="academicYear" class="form-label">Academic Year</label>
+                                <select class="form-select" id="academicYear" name="study_year" required>
+                                    <option value="" selected disabled>Select Year</option>
+                                    <option value="1">1st Year</option>
+                                    <option value="2">2nd Year</option>
+                                    <option value="3">3rd Year</option>
+                                    <option value="4">4th Year</option>
+                                    
+                                </select>
+                            </div>
+                            <!-- Add this after the Subject field -->
+                            <div class="col-md-6 field-softcopy" style="display: none;">
+                                <label class="form-label">Copy Type</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="copy_type" id="softCopy" value="soft" onclick="toggleFileUpload()">
+                                    <label class="form-check-label" for="softCopy">Soft Copy</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="copy_type" id="hardCopy" value="hard" checked onclick="toggleFileUpload()">
+                                    <label class="form-check-label" for="hardCopy">Hard Copy</label>
+                                </div>
+                            </div>
+
+                            <div class="col-12 field-fileupload" style="display: none;">
+                                <label class="form-label">Upload PDF/Document</label>
+                                <input type="file" class="form-control" name="document" accept=".pdf,.doc,.docx">
+                            </div>
+
+
+                            <!-- Description -->
+                            <div class="col-12">
+                                <label class="form-label">Description</label>
+                                <textarea class="form-control" name="description" rows="3" required></textarea>
+                            </div>
+
+                            <!-- Listing Type -->
+                            <div class="col-md-6">
+                                <label class="form-label">Listing Type</label>
+                                <select class="form-select" name="listing_type" id="listingType" required onchange="toggleRentFields()">
+                                    <option value="sell">Sell</option>
+                                    <option value="rent">Rent</option>
+                                </select>
+                            </div>
+                            
+                            <!-- Selling Price field -->
+                            <div class="col-md-6" id="sellPriceField">
+                                <label class="form-label">Selling Price (₹)</label>
+                                <input type="number" class="form-control" name="price" required>
+                            </div>
+                            
+                            <!-- Rent-related fields -->
+                            <div class="col-md-6 rent-field" id="rentPriceField" style="display: none;">
+                                <label class="form-label">Rental Price (₹)</label>
+                                <input type="number" class="form-control" name="rent_price">
+                            </div>
+                            
+                            <div class="col-md-6 rent-field" id="rentTenureField" style="display: none;">
+                                <label class="form-label">Rental Tenure (Days)</label>
+                                <input type="number" class="form-control" name="rent_tenure" min="1">
+                            </div>
+
+                            <!-- Electronic-specific fields -->
+                            <div class="col-md-6 field-working-condition" style="display: none;">
+                                <label class="form-label">Working Condition</label>
+                                <select class="form-select" name="working_condition">
+                                    <option value="">Select Condition</option>
+                                    <option value="Fully functional">Fully functional</option>
+                                    <option value="Needs repair">Needs repair</option>
+                                </select>
+                            </div>
+
+                            <div class="col-md-6 field-warranty" style="display: none;">
+                                <label class="form-label">Warranty Status</label>
+                                <select class="form-select" name="warranty_status">
+                                    <option value="">Select Warranty Status</option>
+                                    <option value="No">No Warranty</option>
+                                    <option value="Yes">Under Warranty</option>
+                                </select>
+                            </div>
+
+                            <!-- Book-specific fields -->
+                            
+
+                            
+
+                            <!-- Image Upload -->
+                            <div class="col-12">
+                                <label class="form-label">Product Image</label>
+                                <input type="file" class="form-control" name="image" accept="image/*" required>
+                                <div id="imagePreview" class="mt-2" style="display: none;">
+                                    <img src="" alt="Preview" style="max-width: 200px; max-height: 200px;">
+                                </div>
+                            </div>
+
+                            <!-- Warning Checkbox -->
+                            <div class="col-12">
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="is_fake_warning" id="fakeWarning" required>
+                                    <label class="form-check-label" for="fakeWarning">
+                                        I confirm that this product is genuine and the information provided is accurate
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="d-grid gap-2 mt-4">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-plus-circle me-2"></i>Create Listing
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Add this right before the closing </body> tag -->
+    <!-- Chat Modal -->
+<!-- Chat Modal -->
+    <!-- Chat Modal -->
+   <!-- Chat Modal -->
+    <div class="modal fade" id="chatModal" tabindex="-1" data-bs-backdrop="static">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content chat-container">
+                <div class="modal-header border-0 p-0">
+                    <button type="button" class="btn-close position-absolute top-0 end-0 m-3 z-3" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="row g-0 h-100">
+                    <!-- Left Sidebar -->
+                    <div class="col-4 chat-sidebar">
+                        <div class="chat-sidebar-header">
+                            <div class="d-flex align-items-center p-3">
+                                <div class="user-avatar me-2">
+                                    <img src="https://via.placeholder.com/40" class="rounded-circle" alt="Profile" id="currentUserAvatar">
+                                </div>
+                                <div class="flex-grow-1">
+                                    <h6 class="mb-0" id="currentUserName"></h6>
+                                    <small class="text-muted">Your Account</small>
+                                </div>
+                            </div>
+                            <div class="search-box p-2">
+                                <div class="input-group">
+                                    <span class="input-group-text border-0 bg-light">
+                                        <i class="fas fa-search text-muted"></i>
+                                    </span>
+                                    <input type="text" class="form-control border-0 bg-light" 
+                                        placeholder="Search conversations" id="chatSearch">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="chat-list" id="chatList">
+                            <!-- Chat list items will be dynamically added here -->
+                        </div>
+                    </div>
+
+                    <!-- Right Chat Window -->
+                    <div class="col-8 chat-window">
+                        <!-- Empty state -->
+                        <div class="chat-empty-state h-100 d-flex flex-column justify-content-center align-items-center text-muted">
+                            <i class="fas fa-comments fa-3x mb-3"></i>
+                            <h5>Welcome to Messages</h5>
+                            <p>Select a conversation to start chatting</p>
+                        </div>
+
+                        <!-- Chat content -->
+                        <div class="chat-content h-100" id="chatContent" style="display: none;">
+                            <div class="chat-header">
+                                <div class="d-flex align-items-center p-3">
+                                    <div class="user-avatar me-2">
+                                        <img src="https://via.placeholder.com/40" 
+                                            class="rounded-circle" 
+                                            alt="Contact"
+                                            id="chatContactAvatar">
+                                    </div>
+                                    <div class="flex-grow-1">
+                                        <h6 class="mb-0" id="chatContactName"></h6>
+                                        <small class="text-muted">
+                                            <span class="online-status">online</span>
+                                        </small>
+                                    </div>
+                                    <button class="btn btn-outline-danger btn-sm" id="reportBtn" onclick="showReportModal()">
+                                        <i class="fas fa-flag"></i> Report
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="chat-messages" id="chatMessages">
+                                <div class="message-container">
+                                    <!-- Messages will be dynamically added here -->
+                                </div>
+                            </div>
+                            <div class="chat-input">
+                                <div class="input-group">
+                                    <input type="text" 
+                                        class="form-control" 
+                                        id="messageInput" 
+                                        placeholder="Type a message"
+                                        disabled
+                                        autocomplete="off">
+                                    <button class="btn btn-primary" id="sendMessage" disabled>
+                                        <i class="fas fa-paper-plane"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Admin Dashboard Modal -->
+   <!-- Enhanced Admin Dashboard Modal -->
+  <!-- Admin Dashboard Modal -->
+    <!-- Update the Admin Dashboard Modal section in index.html -->
+   <!-- Admin Dashboard Modal -->
+    <div class="modal fade" id="adminDashboardModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-fullscreen">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">Admin Dashboard</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <div class="container-fluid">
+                        <div class="row">
+                            <!-- Sidebar -->
+                            <div class="col-md-3 col-lg-2 bg-light p-0 border-end">
+                                <div class="d-flex flex-column h-100">
+                                    <div class="p-3 border-bottom">
+                                        <div class="d-flex align-items-center">
+                                            <div class="me-2">
+                                                <i class="fas fa-user-shield fs-4 text-primary"></i>
+                                            </div>
+                                            <div>
+                                                <h6 class="mb-0">Admin Panel</h6>
+                                                <small class="text-muted">Welcome, ${currentUser.full_name}</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="nav flex-column nav-pills p-3" id="adminTabs" role="tablist">
+                                        <button class="nav-link active" id="dashboard-tab" data-bs-toggle="pill" data-bs-target="#dashboard" type="button" role="tab">
+                                            <i class="fas fa-tachometer-alt me-2"></i> Dashboard
+                                        </button>
+                                        <button class="nav-link" id="users-tab" data-bs-toggle="pill" data-bs-target="#users" type="button" role="tab">
+                                            <i class="fas fa-users me-2"></i> Users
+                                        </button>
+                                        <button class="nav-link" id="listings-tab" data-bs-toggle="pill" data-bs-target="#listings" type="button" role="tab">
+                                            <i class="fas fa-list me-2"></i> Listings
+                                        </button>
+                                        <button class="nav-link" id="reports-tab" data-bs-toggle="pill" data-bs-target="#reports" type="button" role="tab">
+                                            <i class="fas fa-flag me-2"></i> Reports
+                                            <span class="badge bg-danger ms-2" id="reportsBadge">0</span>
+                                        </button>
+                                        <button class="nav-link" id="colleges-tab" data-bs-toggle="pill" data-bs-target="#colleges" type="button" role="tab">
+                                            <i class="fas fa-university me-2"></i> Colleges
+                                        </button>
+                                        <button class="nav-link" id="activity-tab" data-bs-toggle="pill" data-bs-target="#activity" type="button" role="tab">
+                                            <i class="fas fa-history me-2"></i> Activity Log
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Main Content -->
+                            <div class="col-md-9 col-lg-10 p-4">
+                                <div class="tab-content">
+                                    <!-- Dashboard Tab -->
+                                    <div class="tab-pane fade show active" id="dashboard" role="tabpanel">
+                                        <div class="row mb-4">
+                                            <div class="col-md-3">
+                                                <div class="card bg-primary text-white">
+                                                    <div class="card-body">
+                                                        <h5 class="card-title">Total Users</h5>
+                                                        <h2 id="totalUsers">0</h2>
+                                                        <div class="d-flex justify-content-between align-items-center">
+                                                            <small>Last 30 days: <span id="newUsers">0</span></small>
+                                                            <i class="fas fa-users fs-4"></i>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="card bg-success text-white">
+                                                    <div class="card-body">
+                                                        <h5 class="card-title">Verified Users</h5>
+                                                        <h2 id="verifiedUsers">0</h2>
+                                                        <div class="d-flex justify-content-between align-items-center">
+                                                            <small>Unverified: <span id="unverifiedUsers">0</span></small>
+                                                            <i class="fas fa-user-check fs-4"></i>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="card bg-info text-white">
+                                                    <div class="card-body">
+                                                        <h5 class="card-title">Total Listings</h5>
+                                                        <h2 id="totalListings">0</h2>
+                                                        <div class="d-flex justify-content-between align-items-center">
+                                                            <small>Last 30 days: <span id="newListings">0</span></small>
+                                                            <i class="fas fa-list-alt fs-4"></i>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="card bg-warning text-dark">
+                                                    <div class="card-body">
+                                                        <h5 class="card-title">Fake Warnings</h5>
+                                                        <h2 id="fakeWarnings">0</h2>
+                                                        <div class="d-flex justify-content-between align-items-center">
+                                                            <small>Pending: <span id="pendingReports">0</span></small>
+                                                            <i class="fas fa-exclamation-triangle fs-4"></i>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="row mb-4">
+                                            <div class="col-md-6">
+                                                <div class="card">
+                                                    <div class="card-header bg-white">
+                                                        <h5 class="mb-0">User Growth</h5>
+                                                    </div>
+                                                    <div class="card-body">
+                                                        <canvas id="userGrowthChart" height="250"></canvas>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <div class="card">
+                                                    <div class="card-header bg-white">
+                                                        <h5 class="mb-0">Listing Growth</h5>
+                                                    </div>
+                                                    <div class="card-body">
+                                                        <canvas id="listingGrowthChart" height="250"></canvas>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <div class="card">
+                                                    <div class="card-header bg-white">
+                                                        <h5 class="mb-0">Categories Distribution</h5>
+                                                    </div>
+                                                    <div class="card-body">
+                                                        <canvas id="categoryChart" height="250"></canvas>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <div class="card">
+                                                    <div class="card-header bg-white">
+                                                        <h5 class="mb-0">Top Colleges</h5>
+                                                    </div>
+                                                    <div class="card-body">
+                                                        <canvas id="collegeChart" height="250"></canvas>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Users Tab -->
+                                    <div class="tab-pane fade" id="users" role="tabpanel">
+                                        <div class="card">
+                                            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                                <h5 class="mb-0">User Management</h5>
+                                                <div class="d-flex gap-2">
+                                                    <div class="input-group input-group-sm" style="width: 250px;">
+                                                        <span class="input-group-text"><i class="fas fa-search"></i></span>
+                                                        <input type="text" class="form-control" id="userSearch" placeholder="Search users...">
+                                                    </div>
+                                                    <select class="form-select form-select-sm" id="userFilter" style="width: 150px;">
+                                                        <option value="">All Users</option>
+                                                        <option value="verified">Verified</option>
+                                                        <option value="unverified">Unverified</option>
+                                                        <option value="admin">Admins</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div class="card-body p-0">
+                                                <div class="table-responsive">
+                                                    <table class="table table-hover mb-0">
+                                                        <thead class="table-light">
+                                                            <tr>
+                                                                <th width="50">
+                                                                    <input type="checkbox" class="form-check-input" id="selectAllUsers">
+                                                                </th>
+                                                                <th>ID</th>
+                                                                <th>Name</th>
+                                                                <th>Email</th>
+                                                                <th>College</th>
+                                                                <th>Verified</th>
+                                                                <th>Listings</th>
+                                                                <th>Actions</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody id="usersTableBody">
+                                                            <!-- Users will be loaded here -->
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                            <div class="card-footer bg-white d-flex justify-content-between align-items-center">
+                                                <div class="d-flex gap-2">
+                                                    <select class="form-select form-select-sm" id="bulkUserAction" style="width: 150px;">
+                                                        <option value="">Bulk Actions</option>
+                                                        <option value="verify">Verify Selected</option>
+                                                        <option value="unverify">Unverify Selected</option>
+                                                        <option value="delete">Delete Selected</option>
+                                                    </select>
+                                                    <button class="btn btn-sm btn-primary" id="applyBulkAction">Apply</button>
+                                                </div>
+                                                <div class="pagination-info">
+                                                    Showing <span id="userStart">1</span> to <span id="userEnd">10</span> of <span id="userTotal">0</span> users
+                                                </div>
+                                                <div class="d-flex gap-1">
+                                                    <button class="btn btn-sm btn-outline-secondary" id="userPrevPage" disabled>
+                                                        <i class="fas fa-chevron-left"></i>
+                                                    </button>
+                                                    <button class="btn btn-sm btn-outline-secondary" id="userNextPage" disabled>
+                                                        <i class="fas fa-chevron-right"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Listings Tab -->
+                                    <div class="tab-pane fade" id="listings" role="tabpanel">
+                                        <div class="card">
+                                            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                                <h5 class="mb-0">Listing Management</h5>
+                                                <div class="d-flex gap-2">
+                                                    <div class="input-group input-group-sm" style="width: 250px;">
+                                                        <span class="input-group-text"><i class="fas fa-search"></i></span>
+                                                        <input type="text" class="form-control" id="listingSearch" placeholder="Search listings...">
+                                                    </div>
+                                                    <select class="form-select form-select-sm" id="listingFilter" style="width: 150px;">
+                                                        <option value="">All Listings</option>
+                                                        <option value="fake">Fake Warnings</option>
+                                                        <option value="recent">Recent</option>
+                                                        <option value="old">Old</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div class="card-body p-0">
+                                                <div class="table-responsive">
+                                                    <table class="table table-hover mb-0">
+                                                        <thead class="table-light">
+                                                            <tr>
+                                                                <th width="50">
+                                                                    <input type="checkbox" class="form-check-input" id="selectAllListings">
+                                                                </th>
+                                                                <th>ID</th>
+                                                                <th>Title</th>
+                                                                <th>Price</th>
+                                                                <th>Category</th>
+                                                                <th>Seller</th>
+                                                                <th>Fake Warning</th>
+                                                                <th>Actions</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody id="listingsTableBody">
+                                                            <!-- Listings will be loaded here -->
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                            <div class="card-footer bg-white d-flex justify-content-between align-items-center">
+                                                <div class="d-flex gap-2">
+                                                    <select class="form-select form-select-sm" id="bulkListingAction" style="width: 150px;">
+                                                        <option value="">Bulk Actions</option>
+                                                        <option value="flag">Flag as Fake</option>
+                                                        <option value="unflag">Remove Flag</option>
+                                                        <option value="delete">Delete</option>
+                                                    </select>
+                                                    <button class="btn btn-sm btn-primary" id="applyBulkListingAction">Apply</button>
+                                                </div>
+                                                <div class="pagination-info">
+                                                    Showing <span id="listingStart">1</span> to <span id="listingEnd">10</span> of <span id="listingTotal">0</span> listings
+                                                </div>
+                                                <div class="d-flex gap-1">
+                                                    <button class="btn btn-sm btn-outline-secondary" id="listingPrevPage" disabled>
+                                                        <i class="fas fa-chevron-left"></i>
+                                                    </button>
+                                                    <button class="btn btn-sm btn-outline-secondary" id="listingNextPage" disabled>
+                                                        <i class="fas fa-chevron-right"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Reports Tab -->
+                                    <div class="tab-pane fade" id="reports" role="tabpanel">
+                                        <div class="card">
+                                            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                                <h5 class="mb-0">Reported Content</h5>
+                                                <div class="d-flex gap-2">
+                                                    <select class="form-select form-select-sm" id="reportFilter" style="width: 150px;">
+                                                        <option value="">All Reports</option>
+                                                        <option value="pending">Pending</option>
+                                                        <option value="resolved">Resolved</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div class="card-body p-0">
+                                                <div class="table-responsive">
+                                                    <table class="table table-hover mb-0">
+                                                        <thead class="table-light">
+                                                            <tr>
+                                                                <th>ID</th>
+                                                                <th>Listing</th>
+                                                                <th>Reporter</th>
+                                                                <th>Reason</th>
+                                                                <th>Status</th>
+                                                                <th>Date</th>
+                                                                <th>Actions</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody id="reportsTableBody">
+                                                            <!-- Reports will be loaded here -->
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                            <div class="card-footer bg-white d-flex justify-content-between align-items-center">
+                                                <div class="pagination-info">
+                                                    Showing <span id="reportStart">1</span> to <span id="reportEnd">10</span> of <span id="reportTotal">0</span> reports
+                                                </div>
+                                                <div class="d-flex gap-1">
+                                                    <button class="btn btn-sm btn-outline-secondary" id="reportPrevPage" disabled>
+                                                        <i class="fas fa-chevron-left"></i>
+                                                    </button>
+                                                    <button class="btn btn-sm btn-outline-secondary" id="reportNextPage" disabled>
+                                                        <i class="fas fa-chevron-right"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Colleges Tab -->
+                                    <div class="tab-pane fade" id="colleges" role="tabpanel">
+                                        <div class="card">
+                                            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                                <h5 class="mb-0">College Management</h5>
+                                                <div class="d-flex gap-2">
+                                                    <div class="input-group input-group-sm" style="width: 250px;">
+                                                        <span class="input-group-text"><i class="fas fa-search"></i></span>
+                                                        <input type="text" class="form-control" id="collegeSearch" placeholder="Search colleges...">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="card-body p-0">
+                                                <div class="table-responsive">
+                                                    <table class="table table-hover mb-0">
+                                                        <thead class="table-light">
+                                                            <tr>
+                                                                <th>College Name</th>
+                                                                <th>Users</th>
+                                                                <th>Listings</th>
+                                                                <th>Actions</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody id="collegesTableBody">
+                                                            <!-- Colleges will be loaded here -->
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                            <div class="card-footer bg-white d-flex justify-content-between align-items-center">
+                                                <div class="pagination-info">
+                                                    Showing <span id="collegeStart">1</span> to <span id="collegeEnd">10</span> of <span id="collegeTotal">0</span> colleges
+                                                </div>
+                                                <div class="d-flex gap-1">
+                                                    <button class="btn btn-sm btn-outline-secondary" id="collegePrevPage" disabled>
+                                                        <i class="fas fa-chevron-left"></i>
+                                                    </button>
+                                                    <button class="btn btn-sm btn-outline-secondary" id="collegeNextPage" disabled>
+                                                        <i class="fas fa-chevron-right"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Activity Log Tab -->
+                                    <div class="tab-pane fade" id="activity" role="tabpanel">
+                                        <div class="card">
+                                            <div class="card-header bg-white">
+                                                <h5 class="mb-0">Admin Activity Log</h5>
+                                            </div>
+                                            <div class="card-body p-0">
+                                                <div class="table-responsive">
+                                                    <table class="table table-hover mb-0">
+                                                        <thead class="table-light">
+                                                            <tr>
+                                                                <th>ID</th>
+                                                                <th>Admin</th>
+                                                                <th>Action</th>
+                                                                <th>Target</th>
+                                                                <th>Date</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody id="activityTableBody">
+                                                            <!-- Activities will be loaded here -->
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                            <div class="card-footer bg-white d-flex justify-content-between align-items-center">
+                                                <div class="pagination-info">
+                                                    Showing <span id="activityStart">1</span> to <span id="activityEnd">10</span> of <span id="activityTotal">0</span> activities
+                                                </div>
+                                                <div class="d-flex gap-1">
+                                                    <button class="btn btn-sm btn-outline-secondary" id="activityPrevPage" disabled>
+                                                        <i class="fas fa-chevron-left"></i>
+                                                    </button>
+                                                    <button class="btn btn-sm btn-outline-secondary" id="activityNextPage" disabled>
+                                                        <i class="fas fa-chevron-right"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close Dashboard</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- User Details Modal -->
+    <div class="modal fade" id="userDetailsModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">User Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="userDetailsContent">
+                    <!-- User details will be loaded here -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Listing Details Modal -->
+    <div class="modal fade" id="listingDetailsModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Listing Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="listingDetailsContent">
+                    <!-- Listing details will be loaded here -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Report Details Modal -->
+    <div class="modal fade" id="reportDetailsModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Report Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="reportDetailsContent">
+                    <!-- Report details will be loaded here -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-success" id="resolveReportBtn">Mark as Resolved</button>
+                    <button type="button" class="btn btn-primary" id="reviewReportBtn">Mark as Reviewed</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Report Modal -->
+    <div class="modal fade report-modal" id="reportModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Report User</h5>
+                    <button type="button" class="btn-close" onclick="closeReportModal()"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="reportForm" class="report-form">
+                        <input type="hidden" id="reportListingId">
+                        <input type="hidden" id="reportMessageThreadId">
+                        <div class="mb-3">
+                            <label for="reportDescription" class="form-label">Describe why you are reporting this user</label>
+                            <textarea class="form-control" id="reportDescription" rows="4" required placeholder="Explain the issue with this user or conversation..."></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label for="reportImage" class="form-label">Add supporting image (optional)</label>
+                            <input type="file" class="form-control" id="reportImage" accept="image/*">
+                            <img id="reportPreviewImage" class="report-preview-image d-none">
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">Submit Report</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Footer Section -->
+    <footer class="bg-dark text-white pt-5 pb-4">
+        <div class="container">
+            <div class="row">
+                <!-- About Us Column -->
+                <div class="col-md-4 mb-4">
+                    <h5 class="text-primary mb-3">
+                        <i class="fas fa-graduation-cap me-2"></i>StudentsMart
+                    </h5>
+                    <p>The fastest campus service provider connecting students to buy, sell, and rent college essentials.</p>
+                    <button class="btn btn-outline-light btn-sm" onclick="showAboutUs()">
+                        <i class="fas fa-info-circle me-1"></i>About Us
+                    </button>
+                </div>
+                
+                <!-- Quick Links Column -->
+                <div class="col-md-2 mb-4">
+                    <h5 class="text-primary mb-3">Quick Links</h5>
+                    <ul class="list-unstyled">
+                        <li class="mb-2"><a href="#" class="text-white text-decoration-none" onclick="handlePathSelection('buy')"><i class="fas fa-shopping-cart me-2"></i>Buy Items</a></li>
+                        <li class="mb-2"><a href="#" class="text-white text-decoration-none" onclick="handlePathSelection('sell')"><i class="fas fa-store me-2"></i>Sell/Rent</a></li>
+                       
+                    </ul>
+                </div>
+                
+                <!-- Help & Support Column -->
+                <div class="col-md-3 mb-4">
+                    <h5 class="text-primary mb-3">Help & Support</h5>
+                    <ul class="list-unstyled">
+                        <li class="mb-2"><a href="#" class="text-white text-decoration-none" onclick="ShowFAQPageModal()"><i class="fas fa-question-circle me-2"></i>FAQs</a></li>
+                        <li class="mb-2"><a href="#" class="text-white text-decoration-none" onclick="showContactModal()"><i class="fas fa-headset me-2"></i>Contact Us</a></li>
+                        <li class="mb-2"><a href="#" class="text-white text-decoration-none" onclick="showTermsModal()"><i class="fas fa-file-contract me-2"></i>Terms</a></li>
+                        <li class="mb-2"><a href="#" class="text-white text-decoration-none" onclick="showPrivacyModal()"><i class="fas fa-shield-alt me-2"></i>Privacy</a></li>
+                    </ul>
+                </div>
+                
+                <!-- Contact Column -->
+                <div class="col-md-3 mb-4">
+                    <h5 class="text-primary mb-3">Contact Us</h5>
+                    <ul class="list-unstyled">
+                        <li class="mb-2"><i class="fas fa-envelope me-2"></i>stud.studentsmart@gmail.com</li>
+                        <li class="mb-2"><i class="fas fa-phone me-2"></i> +91 8500707175</li>
+                        <li class="mb-2"><i class="fas fa-map-marker-alt me-2"></i> Andhra Pradesh</li>
+                    </ul>
+                    <div class="mt-3">
+                        <a href="https://www.facebook.com/share/17dR5Zg2n9/?mibextid=qi2Omg" class="text-white me-2"><i class="fab fa-facebook-f"></i></a>
+                        <a href="#" class="text-white me-2"><i class="fab fa-twitter"></i></a>
+                        <a href="https://www.instagram.com/edutrade_official?igsh=bzVwb2Z2b2wxczBl" class="text-white me-2"><i class="fab fa-instagram"></i></a>
+                        <a href="#" class="text-white me-2"><i class="fab fa-linkedin-in"></i></a>
+                    </div>
+                </div>
+            </div>
+            <hr class="my-4 bg-secondary">
+            <div class="row">
+                <div class="col-md-6 text-center text-md-start">
+                    <p class="mb-0">&copy; 2025 StudentsMart. All rights reserved.</p>
+                </div>
+                <div class="col-md-6 text-center text-md-end">
+                    <p class="mb-0">Made with <i class="fas fa-heart text-danger"></i> by Team StudentsMart</p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- About Us Modal -->
+    <!-- About Us Modal -->
+    <!-- About Us Modal -->
+    <!-- About Us Modal -->
+    <div class="modal fade" id="aboutUsModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">About StudentsMart</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="text-center mb-4">
+                        <!-- Logo image with proper sizing and fallback -->
+                        <div class="logo-container mb-3" style="width: 120px; height: 120px; margin: 0 auto; overflow: hidden; border-radius: 50%;">
+                            <img src="" id="eduTradeLogo" class="img-fluid" alt="StudentsMart Logo" style="width: 100%; height: 100%; object-fit: cover;">
+                        </div>
+                        <h3>Our Story</h3>
+                        <p class="lead">Connecting students across different colleges through technology and innovation</p>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-4">
+                            <div class="card h-100 shadow-sm">
+                                <div class="card-body text-center">
+                                    <!-- First founder image with proper sizing and fallback -->
+                                    <div class="founder-image-container mb-3" style="width: 120px; height: 120px; margin: 0 auto; overflow: hidden; border-radius: 50%;">
+                                        <img src="https://i.ibb.co/8L2PJS2L/rctr.jpg" id="ramCharanImage" class="img-fluid" alt="Ram Charan" style="width: 100%; height: 100%; object-fit: cover;">
+                                    </div>
+                                    <h5>RAM CHARAN TEJA N L</h5>
+                                    <p class="text-muted">Tech Lead & Co-Founder</p>
+                                    <p>The technical mastermind behind StudentsMart who built the platform from scratch. A computer science student from VEMU college with expertise in Python, AI, and web development.</p>
+                                    <div class="mt-3">
+                                        <a href="https://www.linkedin.com/in/n-l-ram-charan-teja-ba2b25288/" class="btn btn-sm btn-outline-primary rounded-circle mx-1" title="Connect with me"><i class="fab fa-linkedin-in"></i></a>
+                                        <a href="https://github.com/RamCharanTeja-22" class="btn btn-sm btn-outline-primary rounded-circle mx-1" title="Check my repos"><i class="fab fa-github"></i></a>
+                                        <a href="tel:+919177415501" class="btn btn-sm btn-outline-primary rounded-circle mx-1" title="Call Ram Charan"><i class="fas fa-phone"></i></a>
+                                
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6 mb-4">
+                            <div class="card h-100 shadow-sm">
+                                <div class="card-body text-center">
+                                    <!-- Second founder image with proper sizing and fallback -->
+                                    <div class="founder-image-container mb-3" style="width: 120px; height: 120px; margin: 0 auto; overflow: hidden; border-radius: 50%;">
+                                        <img src="https://i.ibb.co/VYzkQbJG/likith.jpg" id="likithImage" class="img-fluid" alt="Likith" style="width: 100%; height: 100%; object-fit: cover;">
+                                    </div>
+                                    <h5>LIKITH</h5>
+                                    <p class="text-muted">Co-Founder</p>
+                                    <p>The visionary from Ram Chandra college who identified a student problem and proposed the concept of a college marketplace. His innovative thinking laid the foundation for StudentsMart.</p>
+                                    <div class="mt-3">
+                                        <a href="https://www.linkedin.com/in/likith-kanigolla-66740a307" class="btn btn-sm btn-outline-primary rounded-circle mx-1" title="Connect with me"><i class="fab fa-linkedin-in"></i></a>
+                                        <a href="https://github.com/likithkanigolla" class="btn btn-sm btn-outline-primary rounded-circle mx-1" title="Ckeck my repos"><i class="fab fa-github"></i></a>
+                                        <a href="tel:+918179373099" class="btn btn-sm btn-outline-primary rounded-circle mx-1" title="Call Likith"><i class="fas fa-phone"></i></a>
+                                    </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Modified Mentorly Section -->
+                    <div class="text-center py-4 border-top border-bottom my-4">
+                        <!-- Mentorly Logo Container with proper dimensions -->
+                        <div class="mentorly-logo-container mb-3" style="max-width: 300px; margin: 0 auto;">
+                            <img src="https://i.ibb.co/CXPFhwY/OP.png" class="img-fluid" alt="Mentorly Logo">
+                        </div>
+                        <!-- Title Below the Image -->
+                        <h4 class="text-primary">Studentsmart is proudly backed by Mentorly.</h4>
+                    </div>
+                    
+                    <!-- Mission Section -->
+                    <div class="card bg-light mt-4">
+                        <div class="card-body">
+                            <h5 class="card-title text-center">Our Mission</h5>
+                            <p class="card-text">At StudentsMart, we believe in the power of connection. Our platform was born from a student problem identified by Likith from Ram Chandra college, which was then developed into a full-fledged platform by Ram Charan from VEMU college.</p>
+                            <p class="card-text fw-bold text-center mt-3">Connecting students. Sharing resources. Building community.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <a href="mailto:contactstudentsmart@gmail.com" class="btn btn-primary">
+                        <i class="fas fa-envelope me-2"></i>Contact Us
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Contact Modal -->
+    <!-- Contact Modal -->
+    <div class="modal fade" id="contactModal" tabindex="-1" aria-labelledby="contactModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="contactModalLabel">
+                        <i class="fas fa-envelope me-2"></i>Contact Us
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Contact Methods -->
+                    <div class="d-flex justify-content-around mb-4">
+                        <a href="mailto:contactstudentsmart@gmail.com" class="text-decoration-none text-center">
+                            <div class="bg-light p-3 rounded-circle mb-2">
+                                <i class="fas fa-envelope fa-2x text-primary"></i>
+                            </div>
+                            <span class="d-block">Email</span>
+                        </a>
+                        <a href="tel:+918500707175" class="text-decoration-none text-center">
+                            <div class="bg-light p-3 rounded-circle mb-2">
+                                <i class="fas fa-phone fa-2x text-primary"></i>
+                            </div>
+                            <span class="d-block">Call</span>
+                        </a>
+                        <a href="https://wa.me/918500707175" target="_blank" class="text-decoration-none text-center">
+                            <div class="bg-light p-3 rounded-circle mb-2">
+                                <i class="fab fa-whatsapp fa-2x text-primary"></i>
+                            </div>
+                            <span class="d-block">WhatsApp</span>
+                        </a>
+                    </div>
+                    
+                    <hr class="my-4">
+                    
+                    <!-- Contact Form -->
+                    <form id="contactForm" class="needs-validation" novalidate>
+                        <div class="mb-3">
+                            <label for="contactName" class="form-label">Full Name</label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="fas fa-user"></i></span>
+                                <input type="text" class="form-control" id="contactName" name="name" placeholder="Enter your name" required>
+                                <div class="invalid-feedback">
+                                    Please provide your name.
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="contactEmail" class="form-label">Email Address</label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="fas fa-at"></i></span>
+                                <input type="email" class="form-control" id="contactEmail" name="email" placeholder="Enter your email" required>
+                                <div class="invalid-feedback">
+                                    Please provide a valid email address.
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="contactSubject" class="form-label">Subject</label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="fas fa-heading"></i></span>
+                                <input type="text" class="form-control" id="contactSubject" name="subject" placeholder="Enter subject" required>
+                                <div class="invalid-feedback">
+                                    Please provide a subject.
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <label for="contactMessage" class="form-label">Message</label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="fas fa-comment-alt"></i></span>
+                                <textarea class="form-control" id="contactMessage" name="message" rows="4" placeholder="Enter your message" required></textarea>
+                                <div class="invalid-feedback">
+                                    Please enter your message.
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary btn-lg">
+                                <i class="fas fa-paper-plane me-2"></i>Send Message
+                            </button>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer bg-light">
+                    <p class="small text-muted mb-0">We'll get back to you within 24 hours.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Terms Modal -->
+    <!-- Terms of Service Modal -->
+    <!-- Terms Modal -->
+    <div class="modal fade" id="termsModal" tabindex="-1" aria-labelledby="termsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="termsModalLabel">
+                        <i class="fas fa-file-contract me-2"></i>StudentsMart Terms of Service
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                
+                <div class="modal-body">
+                    <!-- Header Section -->
+                    <div class="text-center mb-4">
+                        <h4>StudentsMart Marketplace Terms</h4>
+                        <p class="text-muted">Last Updated: June 2024</p>
+                        <div class="alert alert-danger">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            <strong>Important:</strong> Violations may result in permanent account suspension
+                        </div>
+                    </div>
+
+                    <!-- 1. Acceptance of Terms -->
+                    <div class="term-section mb-4">
+                        <div class="card">
+                            <div class="card-header bg-light">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-signature me-2 text-primary"></i>1. Acceptance of Terms
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <p>By using StudentsMart, you agree to these Terms and all applicable laws. If you don't agree, you may not use our services.</p>
+                                <div class="alert alert-warning">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    <strong>Student Responsibility:</strong> You are responsible for all activities under your account.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 2. Marketplace Rules -->
+                    <div class="term-section mb-4">
+                        <div class="card">
+                            <div class="card-header bg-light">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-gavel me-2 text-primary"></i>2. Marketplace Rules
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <h6 class="text-primary"><i class="fas fa-list-check me-2"></i>Listing Requirements</h6>
+                                <ul class="fa-ul">
+                                    <li><span class="fa-li"><i class="fas fa-check text-success"></i></span>All listings must be accurate and truthful</li>
+                                    <li><span class="fa-li"><i class="fas fa-check text-success"></i></span>You must own or have rights to sell the items</li>
+                                    <li><span class="fa-li"><i class="fas fa-check text-success"></i></span>Prices must be fair (no price gouging)</li>
+                                    <li><span class="fa-li"><i class="fas fa-check text-success"></i></span>Digital content must be legally obtained</li>
+                                </ul>
+
+                                <h6 class="text-primary mt-4"><i class="fas fa-ban me-2"></i>Prohibited Actions</h6>
+                                <ul class="fa-ul">
+                                    <li><span class="fa-li"><i class="fas fa-times text-danger"></i></span>No fake/misleading listings (instant ban)</li>
+                                    <li><span class="fa-li"><i class="fas fa-times text-danger"></i></span>No academic dishonesty (selling exams/assignments)</li>
+                                    <li><span class="fa-li"><i class="fas fa-times text-danger"></i></span>No harassment or discrimination</li>
+                                    <li><span class="fa-li"><i class="fas fa-times text-danger"></i></span>No spam or commercial advertising</li>
+                                </ul>
+
+                                <div class="alert alert-danger mt-3">
+                                    <i class="fas fa-skull-crossbones me-2"></i>
+                                    <strong>Zero Tolerance:</strong> Academic cheating services will result in permanent ban and reporting to your institution.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3. Privacy & Conduct -->
+                    <div class="term-section mb-4">
+                        <div class="card">
+                            <div class="card-header bg-light">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-user-shield me-2 text-primary"></i>3. Privacy & Conduct
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <h6 class="text-primary"><i class="fas fa-handshake me-2"></i>Community Standards</h6>
+                                <ul>
+                                    <li>Keep all communications within StudentsMart</li>
+                                    <li>Never share personal contact information in listings</li>
+                                    <li>Report suspicious activity immediately</li>
+                                    <li>Meet in public spaces for exchanges</li>
+                                </ul>
+
+                                <div class="alert alert-info mt-3">
+                                    <i class="fas fa-lightbulb me-2"></i>
+                                    <strong>Safety Tip:</strong> Use our messaging system for all communications to stay protected.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4. Account Termination -->
+                    <div class="term-section mb-4">
+                        <div class="card">
+                            <div class="card-header bg-light">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-user-slash me-2 text-primary"></i>4. Account Termination
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <p>We may suspend or terminate your account immediately if you:</p>
+                                <ul class="fa-ul">
+                                    <li><span class="fa-li"><i class="fas fa-hammer text-danger"></i></span>Violate these Terms</li>
+                                    <li><span class="fa-li"><i class="fas fa-hammer text-danger"></i></span>Harm other users</li>
+                                    <li><span class="fa-li"><i class="fas fa-hammer text-danger"></i></span>Attempt to bypass our systems</li>
+                                </ul>
+                                <p class="mt-3"><strong>Note:</strong> Permanent bans may include device blocking and reporting to your college administration for serious violations.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 5. Dispute Resolution -->
+                    <div class="term-section mb-4">
+                        <div class="card">
+                            <div class="card-header bg-light">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-balance-scale me-2 text-primary"></i>5. Dispute Resolution
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <h6 class="text-primary"><i class="fas fa-flag me-2"></i>Reporting Issues</h6>
+                                <p>If you have a problem with another user:</p>
+                                <ol>
+                                    <li>Use our <strong>Report</strong> button immediately</li>
+                                    <li>Provide evidence (screenshots, etc.)</li>
+                                    <li>Our team will investigate within 48 hours</li>
+                                </ol>
+                                <div class="alert alert-warning mt-3">
+                                    <i class="fas fa-exclamation-circle me-2"></i>
+                                    StudentsMart acts as a platform only - we're not responsible for transactions between users.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Final Acknowledgement -->
+                    <div class="alert alert-dark">
+                        <div class="d-flex">
+                            <div class="me-3">
+                                <i class="fas fa-signature fa-2x text-primary"></i>
+                            </div>
+                            <div>
+                                <h5 class="alert-heading">Your Agreement</h5>
+                                <p>By using StudentsMart, you confirm that:</p>
+                                <ul class="mb-0">
+                                    <li>You're currently enrolled at a recognized educational institution</li>
+                                    <li>You'll maintain academic integrity</li>
+                                    <li>You've read and accept these Terms</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-2"></i>Close
+                    </button>
+                    <button type="button" class="btn btn-primary" data-bs-dismiss="modal">
+                        <i class="fas fa-check me-2"></i>I Understand
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Privacy Modal -->
+    <div class="modal fade" id="privacyModal" tabindex="-1" aria-labelledby="privacyModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="privacyModalLabel">Privacy Policy</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="container">
+                        <h2 class="mb-3">StudentsMart Privacy Policy</h2>
+                        <p class="text-muted mb-4">Last Updated: April, 2025</p>
+                        
+                        <!-- Table of Contents -->
+                        <div class="card bg-light mb-4">
+                            <div class="card-body">
+                                <h6 class="card-title">Contents</h6>
+                                <ul class="list-unstyled">
+                                    <li><a href="#information-collected">1. Information We Collect</a></li>
+                                    <li><a href="#information-use">2. How We Use Your Information</a></li>
+                                    <li><a href="#information-sharing">3. Information Sharing</a></li>
+                                    <li><a href="#data-security">4. Data Security</a></li>
+                                    <li><a href="#your-choices">5. Your Choices</a></li>
+                                    <li><a href="#policy-changes">6. Changes to This Policy</a></li>
+                                    <li><a href="#contact-us">7. Contact Us</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        
+                        <!-- Section 1 -->
+                        <section id="information-collected" class="mb-4">
+                            <h4 class="border-bottom pb-2 text-primary">1. Information We Collect</h4>
+                            <p>We collect personal information you provide when registering, creating listings, or contacting other users. This may include:</p>
+                            <ul>
+                                <li>Name and email address</li>
+                                <li>College or university information</li>
+                                <li>Profile picture and bio information</li>
+                                <li>Information about items you list for sale or exchange</li>
+                                <li>Communication data between you and other users</li>
+                                <li>Device and usage information when you access our platform</li>
+                            </ul>
+                        </section>
+                        
+                        <!-- Section 2 -->
+                        <section id="information-use" class="mb-4">
+                            <h4 class="border-bottom pb-2 text-primary">2. How We Use Your Information</h4>
+                            <p>We use your information to:</p>
+                            <ul>
+                                <li>Create and maintain your account</li>
+                                <li>Provide and improve our services</li>
+                                <li>Facilitate transactions between users</li>
+                                <li>Send important notifications and updates</li>
+                                <li>Protect against fraudulent or unauthorized activity</li>
+                                <li>Personalize your experience on the platform</li>
+                            </ul>
+                        </section>
+                        
+                        <!-- Section 3 -->
+                        <section id="information-sharing" class="mb-4">
+                            <h4 class="border-bottom pb-2 text-primary">3. Information Sharing</h4>
+                            <p>We do not sell your personal information. We may share information:</p>
+                            <ul>
+                                <li>With other users as necessary to facilitate transactions</li>
+                                <li>With service providers who help operate our platform</li>
+                                <li>When required by law or to protect rights and safety</li>
+                                <li>In the event of a business transfer or acquisition</li>
+                            </ul>
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle"></i> Your public profile and listings are visible to other StudentsMart users.
+                            </div>
+                        </section>
+                        
+                        <!-- Section 4 -->
+                        <section id="data-security" class="mb-4">
+                            <h4 class="border-bottom pb-2 text-primary">4. Data Security</h4>
+                            <p>We implement appropriate technical and organizational security measures to protect your information, including:</p>
+                            <ul>
+                                <li>Encryption of sensitive data</li>
+                                <li>Regular security assessments</li>
+                                <li>Restricted access to personal information</li>
+                            </ul>
+                            <p>While we strive to protect your information, no method of transmission over the Internet is 100% secure.</p>
+                        </section>
+                        
+                        <!-- Section 5 -->
+                        <section id="your-choices" class="mb-4">
+                            <h4 class="border-bottom pb-2 text-primary">5. Your Choices</h4>
+                            <p>You have several rights regarding your personal information:</p>
+                            <ul>
+                                <li>Access, update, or correct your account information at any time</li>
+                                <li>Request deletion of your account and personal data</li>
+                                <li>Opt out of marketing communications</li>
+                                <li>Control privacy settings for your profile and listings</li>
+                            </ul>
+                            <p>To exercise these rights, visit your account settings or contact our support team.</p>
+                        </section>
+                        
+                        <!-- Section 6 -->
+                        <section id="policy-changes" class="mb-4">
+                            <h4 class="border-bottom pb-2 text-primary">6. Changes to This Policy</h4>
+                            <p>We may update this policy periodically to reflect changes in our practices or legal requirements. We will notify you of significant changes through:</p>
+                            <ul>
+                                <li>Email notification (for registered users)</li>
+                                <li>Prominent notice on our website or app</li>
+                            </ul>
+                            <p>Continued use of the service after changes constitutes acceptance of the modified policy.</p>
+                        </section>
+                        
+                        <!-- Section 7 -->
+                        <section id="contact-us">
+                            <h4 class="border-bottom pb-2 text-primary">7. Contact Us</h4>
+                            <p>If you have questions or concerns about this Privacy Policy or our data practices, please contact us at:</p>
+                            <p><strong>Email:</strong> contactstudentsmart@gmail.com</p>
+                            <p><strong>Address:</strong> StudentsMart, Inc., 123 Campus Way, College Town, ST 12345</p>
+                        </section>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" data-bs-dismiss="modal">I Understand</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal fade" id="FAQPageModal" tabindex="-1" aria-labelledby="FAQPageModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="FAQPageModalLabel">Frequently Asked Questions</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="container">
+                        <div class="row">
+                            <div class="col-12 text-center">
+                                <h2 class="mb-4">Frequently Asked Questions</h2>
+                                <p class="lead mb-4">
+                                    Find answers to common questions about StudentsMart.
+                                </p>
+                            </div>
+                        </div>
+                        
+                        <div class="row mt-4">
+                            <div class="col-12">
+                                <div class="accordion" id="faqAccordion">
+                                    <!-- FAQ Item 1 -->
+                                    <div class="accordion-item mb-3 border-0 rounded overflow-hidden">
+                                        <h2 class="accordion-header" id="headingOne">
+                                            <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapseOne">
+                                                How do I create an account?
+                                            </button>
+                                        </h2>
+                                        <div id="collapseOne" class="accordion-collapse collapse show" data-bs-parent="#faqAccordion">
+                                            <div class="accordion-body">
+                                                Click on the "Register" button in the top right corner and fill out the registration form with your details. 
+                                                You'll need to verify your email address to complete the registration.
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- FAQ Item 2 -->
+                                    <div class="accordion-item mb-3 border-0 rounded overflow-hidden">
+                                        <h2 class="accordion-header" id="headingTwo">
+                                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseTwo">
+                                                Is there a fee for using StudentsMart?
+                                            </button>
+                                        </h2>
+                                        <div id="collapseTwo" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
+                                            <div class="accordion-body">
+                                                No, StudentsMart is completely free for students to use. We don't charge any fees for listing items or making purchases.
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- FAQ Item 3 -->
+                                    <div class="accordion-item mb-3 border-0 rounded overflow-hidden">
+                                        <h2 class="accordion-header" id="headingThree">
+                                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseThree">
+                                                How do I contact a seller?
+                                            </button>
+                                        </h2>
+                                        <div id="collapseThree" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
+                                            <div class="accordion-body">
+                                                Click on the "Contact Seller" button on any listing to send a message to the seller. 
+                                                You can then continue the conversation in your messages.
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- FAQ Item 4 -->
+                                    <div class="accordion-item mb-3 border-0 rounded overflow-hidden">
+                                        <h2 class="accordion-header" id="headingFour">
+                                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseFour">
+                                                What should I do if I encounter a problem?
+                                            </button>
+                                        </h2>
+                                        <div id="collapseFour" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
+                                            <div class="accordion-body">
+                                                If you encounter any issues with a seller or listing, please use the "Report" button or contact our support team immediately.
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- FAQ Item 5 -->
+                                    <div class="accordion-item mb-3 border-0 rounded overflow-hidden">
+                                        <h2 class="accordion-header" id="headingFive">
+                                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseFive">
+                                                Can I sell items from other colleges?
+                                            </button>
+                                        </h2>
+                                        <div id="collapseFive" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
+                                            <div class="accordion-body">
+                                                Currently, StudentsMart is designed for transactions within the same college campus to ensure safety and convenience. 
+                                                We may expand this feature in the future.
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/emailjs-com@3/dist/email.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11.0.19/dist/sweetalert2.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const yearDropdown = document.getElementById('propertyYear');
+            if (yearDropdown) {
+                const currentYear = new Date().getFullYear();
+                // Add years from current year down to 1900
+                for (let year = currentYear; year >= 4; year--) {
+                    const option = document.createElement('option');
+                    option.value = year;
+                    option.textContent = year;
+                    yearDropdown.appendChild(option);
+                }
+            }
+        });
+        // Footer-related functions
+        function showAboutUs() {
+            const aboutModal = new bootstrap.Modal(document.getElementById('aboutUsModal'));
+            aboutModal.show();
+        }
+
+        function showContactModal() {
+            const contactModal = new bootstrap.Modal(document.getElementById('contactModal'));
+            contactModal.show();
+        }
+        function ShowFAQPageModal(){
+            const FAQPageModal = new bootstrap.Modal(document.getElementById('FAQPageModal'));
+            FAQPageModal.show();
+
+        }
+
+        function showTermsModal() {
+            const termsModal = new bootstrap.Modal(document.getElementById('termsModal'));
+            termsModal.show();
+        }
+
+        function showPrivacyModal() {
+            const privacyModal = new bootstrap.Modal(document.getElementById('privacyModal'));
+            privacyModal.show();
+        }
+
+        // Contact form submission
+        // Form validation script for contact form
+        document.addEventListener('DOMContentLoaded', function() {
+            const contactForm = document.getElementById('contactForm');
+            
+            if (contactForm) {
+                // Form submit event handler with validation
+                contactForm.addEventListener('submit', function(event) {
+                    event.preventDefault();
+                    
+                    // Check form validity using Bootstrap validation
+                    if (!this.checkValidity()) {
+                        event.stopPropagation();
+                        this.classList.add('was-validated');
+                        return;
+                    }
+                    
+                    // Get submit button
+                    const submitBtn = this.querySelector('button[type="submit"]');
+                    const originalText = submitBtn.innerHTML;
+                    
+                    // Disable button and show loading state
+                    submitBtn.disabled = true;
+                    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Sending...';
+                    
+                    // Get form data
+                    const formData = {
+                        name: document.getElementById('contactName').value,
+                        email: document.getElementById('contactEmail').value,
+                        subject: document.getElementById('contactSubject').value,
+                        message: document.getElementById('contactMessage').value
+                    };
+                    
+                    // Send email using fetch API to your server endpoint or a service like Formspree
+                    fetch('https://formspree.io/f/myzwpvvp', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(formData)
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('Success:', data);
+                        
+                        // Show success message
+                        Swal.fire({
+                            title: 'Message Sent!',
+                            text: 'Thank you for contacting us. We will get back to you within 24 hours.',
+                            icon: 'success',
+                            confirmButtonColor: '#0d6efd',
+                            timer: 3000,
+                            timerProgressBar: true
+                        });
+                        
+                        // Close modal
+                        const contactModal = bootstrap.Modal.getInstance(document.getElementById('contactModal'));
+                        if (contactModal) {
+                            contactModal.hide();
+                        }
+                        
+                        // Reset form validation state
+                        this.classList.remove('was-validated');
+                        
+                        // Reset form inputs
+                        this.reset();
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        
+                        // Show error message
+                        Swal.fire({
+                            title: 'Message Not Sent',
+                            text: 'Sorry, there was a problem sending your message. Please try again or use another contact method.',
+                            icon: 'error',
+                            confirmButtonColor: '#dc3545'
+                        });
+                    })
+                    .finally(() => {
+                        // Restore button state
+                        submitBtn.disabled = false;
+                        submitBtn.innerHTML = originalText;
+                    });
+                });
+
+                // Real-time validation feedback
+                const formInputs = contactForm.querySelectorAll('input, textarea');
+                formInputs.forEach(input => {
+                    input.addEventListener('blur', function() {
+                        // Check validity when input loses focus
+                        if (this.checkValidity()) {
+                            this.classList.remove('is-invalid');
+                            this.classList.add('is-valid');
+                        } else {
+                            this.classList.remove('is-valid');
+                            this.classList.add('is-invalid');
+                        }
+                    });
+                });
+            }
+            
+            // Check if we're on a buy page (Keep this functionality from your original code)
+            const footer = document.querySelector('footer');
+            if (footer) {
+                if (window.location.pathname.includes('buy') || window.location.href.includes('buy.html')) {
+                    footer.style.display = 'none';
+                } else {
+                    footer.style.display = 'block';
+                }
+            }
+        });
+        // Global variables
+        let currentUser = null;
+        let currentListingId = null;
+        let currentMessageThreadId = null;
+        let currentOtherUserId = null;
+
+        // Function to open the report modal
+        function openReportModal() {
+            console.log("Opening report modal");
+            
+            if (!currentListingId || !currentMessageThreadId) {
+                console.error("Missing listing ID or message thread ID for report");
+                // Try to get from URL if available
+                const urlParams = new URLSearchParams(window.location.search);
+                const listingId = urlParams.get('listing');
+                
+                if (listingId) {
+                    currentListingId = listingId;
+                } else {
+                    showAlert('Error', 'Cannot report at this time. Please try again later.', 'error');
+                    return;
+                }
+            }
+            
+            // Set values in the hidden fields
+            document.getElementById('reportListingId').value = currentListingId;
+            document.getElementById('reportMessageThreadId').value = currentMessageThreadId || '';
+            
+            const reportModal = new bootstrap.Modal(document.getElementById('reportModal'));
+            reportModal.show();
+        }
+        
+        // Handle loading messages in the chat
+        async function loadMessages(otherUserId, listingId) {
+            try {
+                console.log(`Loading messages for user ${otherUserId} and listing ${listingId}`);
+                currentOtherUserId = otherUserId;
+                currentListingId = listingId;
+                
+                const response = await fetch(`/api/messages?other_user_id=${otherUserId}&listing_id=${listingId}`, {
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) throw new Error('Failed to load messages');
+                
+                const data = await response.json();
+                const messages = data.messages || [];
+                
+                console.log(`Loaded ${messages.length} messages`);
+                
+                // Set the first message's ID as the thread ID for reporting
+                if (messages && messages.length > 0) {
+                    currentMessageThreadId = messages[0].id;
+                    console.log(`Set message thread ID to ${currentMessageThreadId}`);
+                } else {
+                    // If no messages exist yet, we need to create a placeholder message thread ID
+                    // This can be a timestamp or other unique identifier
+                    currentMessageThreadId = `temp_${Date.now()}`;
+                    console.log(`No messages found, using temporary ID: ${currentMessageThreadId}`);
+                }
+                
+                // Update the chat window UI with messages...
+                // [existing message display code]
+                
+            } catch (error) {
+                console.error('Error loading messages:', error);
+            }
+        }
+        
+        // Handle report form submission
+        document.getElementById('reportForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData();
+            const listingId = document.getElementById('reportListingId').value;
+            const messageThreadId = document.getElementById('reportMessageThreadId').value;
+            const description = document.getElementById('reportDescription').value;
+            
+            if (!description) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error',
+                    text: 'Please describe the issue you\'re reporting.'
+                });
+                return;
+            }
+            
+            // Always ensure we have a message thread ID (even if temporary)
+            if (!messageThreadId) {
+                const tempId = `temp_${Date.now()}`;
+                console.log("Created temporary ID for form submission:", tempId);
+                formData.append('message_thread_id', tempId);
+            } else {
+                formData.append('message_thread_id', messageThreadId);
+            }
+            
+            // Add listing ID if available
+            if (listingId) {
+                formData.append('listing_id', listingId);
+            }
+            
+            formData.append('description', description);
+            
+            const reportImage = document.getElementById('reportImage').files[0];
+            if (reportImage) {
+                formData.append('image', reportImage);
+            }
+            
+            try {
+                // Show loading state
+                Swal.fire({
+                    title: 'Submitting report...',
+                    text: 'Please wait',
+                    allowOutsideClick: false,
+                    didOpen: () => {
+                        Swal.showLoading();
+                    }
+                });
+                
+                const response = await fetch('/api/report/create', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                if (response.ok) {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Report Submitted',
+                        text: 'Thank you for your report. We will review it shortly.'
+                    });
+                    closeReportModal();
+                    
+                    // Clear the form
+                    document.getElementById('reportDescription').value = '';
+                    document.getElementById('reportImage').value = '';
+                    document.getElementById('reportPreviewImage').classList.add('d-none');
+                } else {
+                    throw new Error(data.error || 'Failed to submit report');
+                }
+            } catch (error) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error',
+                    text: error.message
+                });
+            }
+        });
+
+        // Preview report image
+        document.getElementById('reportImage').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            const preview = document.getElementById('reportPreviewImage');
+            
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    preview.src = e.target.result;
+                    preview.classList.remove('d-none');
+                };
+                reader.readAsDataURL(file);
+            } else {
+                preview.classList.add('d-none');
+            }
+        });
+        
+        // Enhanced JavaScript functionality
+        const modals = {
+            login: new bootstrap.Modal(document.getElementById('loginModal')),
+            register: new bootstrap.Modal(document.getElementById('registerModal')),
+            createListing: new bootstrap.Modal(document.getElementById('createListingModal'))
+        };
+
+        // Add this function to handle path selection
+        // Update the handlePathSelection function:
+        function handlePathSelection(path) {
+            currentPath = path;
+            
+            if (!currentUser) {
+                showLoginModal();
+                return;
+            }
+            
+            const heroSection = document.querySelector('.hero-section');
+            const searchSection = document.querySelector('.search-section');
+            const listingsSection = document.getElementById('listingsSection');
+            
+            if (path === 'buy') {
+                // Hide hero, show search and listings
+                heroSection.style.display = 'none';
+                searchSection.style.display = 'block';
+                listingsSection.style.display = 'block';
+                
+                // Set the college filter to user's college by default
+                if (currentUser && currentUser.college) {
+                    const collegeFilter = document.getElementById('collegeFilter');
+                    collegeFilter.value = currentUser.college;
+                }
+                
+                loadListings();
+            } else if (path === 'sell') {
+                showCreateListing();
+            }
+        }
+
+        // Add this to your DOMContentLoaded event listener
+        document.addEventListener('DOMContentLoaded', () => {
+            // ... existing code ...
+
+            // Hide search section by default on home page
+            const searchSection = document.querySelector('.search-section');
+            if (searchSection) {
+                searchSection.style.display = 'none';
+            }
+
+            // Only show search section if we're on a specific path
+            if (currentPath === 'buy') {
+                searchSection.style.display = 'block';
+            }
+            const collegeFilter = document.getElementById('collegeFilter');
+            if (currentUser && currentUser.college) {
+                collegeFilter.value = currentUser.college;
+            }
+            
+            // Add event listener for college filter change
+            collegeFilter.addEventListener('change', function() {
+                loadListings();
+            });
+
+            // ... rest of your code ...
+        });
+
+        // Utility Functions
+        function showLoading() {
+            document.getElementById('loadingSkeleton').style.display = 'flex';
+            document.getElementById('listingsGrid').style.display = 'none';
+        }
+        
+        function hideLoading() {
+            document.getElementById('loadingSkeleton').style.display = 'none';
+            document.getElementById('listingsGrid').style.display = 'flex';
+        }
+
+        function showAlert(title, text, icon) {
+            Swal.fire({
+                title,
+                text,
+                icon,
+                confirmButtonColor: '#2563eb'
+            });
+        }
+
+        // Modal Functions
+        function showLoginModal() {
+            modals.login.show();
+        }
+
+        function showRegisterModal() {
+            modals.register.show();
+        }
+
+        function showCreateListing() {
+            if (!currentUser) {
+                showAlert('Please Login', 'You need to login to create a listing', 'warning');
+                return;
+            }
+            modals.createListing.show();
+        }
+
+        // Authentication Functions
+        function updateAuthUI() {
+            if (currentUser) {
+                // Show user menu, hide auth buttons
+                document.getElementById('userMenu').classList.remove('d-none');
+                document.getElementById('authButtons').classList.add('d-none');
+                document.getElementById('userName').textContent = currentUser.full_name;
+                
+                // Show admin menu if user is admin
+                if (currentUser.is_admin) {
+                    document.getElementById('adminMenu').classList.remove('d-none');
+                    document.getElementById('reportsMenu').classList.remove('d-none');
+                    
+                    // Get report count
+                    fetch('/admin/dashboard')
+                        .then(response => response.json())
+                        .then(data => {
+                            const pendingReports = data.stats.pending_reports || 0;
+                            document.getElementById('navReportsBadge').textContent = pendingReports;
+                            
+                            if (pendingReports > 0) {
+                                document.getElementById('navReportsBadge').style.display = 'inline-block';
+                            } else {
+                                document.getElementById('navReportsBadge').style.display = 'none';
+                            }
+                        })
+                        .catch(error => console.error('Error fetching report counts:', error));
+                } else {
+                    document.getElementById('adminMenu').classList.add('d-none');
+                    document.getElementById('reportsMenu').classList.add('d-none');
+                }
+            } else {
+                // Show auth buttons, hide user menu
+                document.getElementById('userMenu').classList.add('d-none');
+                document.getElementById('authButtons').classList.remove('d-none');
+                document.getElementById('adminMenu').classList.add('d-none');
+                document.getElementById('reportsMenu').classList.add('d-none');
+            }
+        }
+
+        async function logout() {
+            try {
+                await fetch('/logout', {
+                    method: 'GET',
+                    credentials: 'same-origin'
+                });
+                
+                // Clear all admin-related localStorage items
+                localStorage.removeItem('isAdmin');
+                localStorage.removeItem('adminDashboardOpen');
+                
+                currentUser = null;
+                updateAuthUI();
+                
+                // Show success message
+                Swal.fire({
+                    title: 'Success',
+                    text: 'Logged out successfully',
+                    icon: 'success',
+                    timer: 2000,
+                    showConfirmButton: false
+                });
+                
+                // Reset any path-specific UI elements
+                const heroSection = document.querySelector('.hero-section');
+                const listingsSection = document.getElementById('listingsSection');
+                
+                // Show hero section (home page) and hide listings section
+                heroSection.style.display = 'flex';
+                listingsSection.style.display = 'none';
+                
+                // Reset current path
+                currentPath = null;
+                
+                // Optionally, you could redirect to the root URL after a short delay
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 2000);
+            } catch (error) {
+                showAlert('Error', 'Failed to logout', 'error');
+            }
+        }
+
+        // Listing Functions
+        async function loadListings() {
+            showLoading();
+            try {
+                // Get filters with proper encoding
+                const query = encodeURIComponent(document.getElementById('searchInput').value);
+                const category = encodeURIComponent(document.getElementById('categoryFilter').value);
+                const college = currentUser ? encodeURIComponent(currentUser.college) : '';
+                const sort = document.getElementById('sortFilter').value;
+        
+                // Sorting logic
+                let sortBy = 'created_at';
+                if (sort === 'price_low') sortBy = 'price_asc';
+                if (sort === 'price_high') sortBy = 'price_desc';
+        
+                console.debug("Fetching listings with params:", { query, category, college, sortBy });
+        
+                const response = await fetch(
+                    `/listings?q=${query}&category=${category}&college=${college}&sort_by=${sortBy}`,
+                    { credentials: 'same-origin' }
+                );
+        
+                if (!response.ok) throw new Error(`HTTP ${response.status} - ${await response.text()}`);
+        
+                const { listings } = await response.json();
+                console.debug("API Response:", listings);
+        
+                const grid = document.getElementById('listingsGrid');
+                grid.innerHTML = '';
+        
+                if (listings.length === 0) {
+                    grid.innerHTML = `
+                        <div class="col-12 text-center my-5">
+                            <h4>No listings found</h4>
+                            ${college ? `<p class="text-muted">Try adjusting filters or search terms</p>` : ''}
+                        </div>`;
+                    return;
+                }
+        
+                listings.forEach(listing => {
+                    console.debug("Processing listing:", listing.id, listing);
+                    const isSoftCopy = Boolean(listing.is_softcopy);
+                    const card = document.createElement('div');
+                    card.className = 'col-md-4 col-lg-3 mb-4';
+        
+                    // Image handling with fallback
+                    const imageUrl = listing.image_url?.startsWith('http') 
+                        ? listing.image_url 
+                        : `/static/${listing.image_url || 'images/placeholder.jpg'}`;
+        
+                    // In your loadListings function, update the card HTML to include faculty name
+                    card.innerHTML = `
+                        <div class="card listing-card h-100">
+                            <div class="card-img-top position-relative">
+                                <img src="${imageUrl}" 
+                                    class="listing-image" 
+                                    alt="${listing.title}"
+                                    loading="lazy">
+                                
+                                ${listing.is_softcopy ? `
+                                <div class="position-absolute top-0 start-0 m-2">
+                                    <span class="badge bg-info">
+                                        <i class="fas fa-file-pdf me-1"></i>Digital Copy
+                                    </span>
+                                </div>` : ''}
+                            </div>
+                        
+                            <div class="card-body d-flex flex-column">
+                                <h5 class="card-title">${listing.title}</h5>
+                                
+                                ${listing.faculty_name ? `
+                                <div class="faculty-badge mb-2">
+                                    <span class="badge bg-warning text-dark">
+                                        <i class="fas fa-chalkboard-teacher me-1"></i>${listing.faculty_name}
+                                    </span>
+                                </div>` : ''}
+                                
+                                <div class="price-display mb-2">
+                                    ${listing.is_for_rent ?
+                                    `<span class="text-success fw-bold">₹${listing.rent_price}</span>
+                                        <small class="text-muted">/day</small>` :
+                                    `<span class="text-primary fw-bold">₹${listing.price}</span>
+                                        ${listing.is_softcopy ? '<small class="text-muted">(Digital Edition)</small>' : ''}`}
+                                </div>
+                            
+                                <div class="badge-container mb-2">
+                                    <span class="badge bg-primary">${listing.category}</span>
+                                    ${listing.branch ? `<span class="badge bg-secondary">${listing.branch}</span>` : ''}
+                                    ${listing.condition && `<span class="badge bg-secondary">${listing.condition}</span>`}
+                                    ${listing.is_for_rent ?
+                                    '<span class="badge bg-success">For Rent</span>' :
+                                    '<span class="badge bg-info">For Sale</span>'}
+                                </div>
+                            
+                                <div class="seller-info mb-3">
+                                    <small class="text-muted">
+                                        <i class="fas fa-user-circle me-1"></i>
+                                        ${listing.seller?.name || 'Unknown Seller'}
+                                    </small>
+                                    <br>
+                                    <small class="text-muted">
+                                        <i class="fas fa-university me-1"></i>
+                                        ${listing.seller?.college || 'College not specified'}
+                                    </small>
+                                </div>
+                            
+                                ${listing.is_softcopy ?
+                                    `<a href="/download/${listing.id}" 
+                                        class="btn btn-success btn-download w-100 mb-2"
+                                        onclick="return handleDownload(${listing.id}, '${listing.title}', event)">
+                                        <i class="fas fa-download me-2"></i>Download PDF
+                                    </a>` :
+                                    `<button class="btn btn-primary w-100 mb-2" 
+                                            onclick="contactSeller(${listing.id})">
+                                        <i class="fas fa-envelope me-2"></i>Contact Seller
+                                    </button>`}
+                            
+                                <button id="wishlist-btn-${listing.id}" 
+                                        class="btn btn-outline-primary w-100 mt-auto" 
+                                        onclick="addToWishlist(${listing.id})">
+                                    <i class="fas fa-heart me-2"></i>Wishlist
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                    grid.appendChild(card);
+                });
+            } catch (error) {
+                console.error('Listing load error:', error);
+                showAlert('Error', `Failed to load listings: ${error.message}`, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+        // Add this to your main.js file or include it as a script
+        (async function debugAPI() {
+            try {
+            const response = await fetch('/listings', {credentials: 'same-origin'});
+            const data = await response.json();
+            console.log("All listings data:", data);
+            
+            // Check specifically for the CFGVBHJN listing
+            const targetListing = data.listings.find(l => l.title === "CFGVBHJN");
+            if (targetListing) {
+                console.log("Target listing found:", targetListing);
+                console.log("is_softcopy value:", targetListing.is_softcopy);
+                console.log("file_url value:", targetListing.file_url);
+            } else {
+                console.log("Target listing 'CFGVBHJN' not found in response");
+            }
+            } catch (error) {
+            console.error("Debug API error:", error);
+            }
+        })();
+
+        async function contactSeller(listingId) {
+            if (!currentUser) {
+                showAlert('Please Login', 'You need to login to contact sellers', 'warning');
+                return;
+            }
+            
+            try {
+                // First get the listing details
+                const response = await fetch(`/listings?id=${listingId}`, {
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) throw new Error('Failed to fetch listing details');
+                
+                const data = await response.json();
+                const listing = data.listings[0];
+                
+                const { value: message } = await Swal.fire({
+                    title: 'Send Message to Seller',
+                    input: 'textarea',
+                    inputLabel: 'Your message',
+                    inputPlaceholder: 'Type your message here...',
+                    inputAttributes: {
+                        'aria-label': 'Type your message here'
+                    },
+                    showCancelButton: true,
+                    confirmButtonText: 'Send Message',
+                    showLoaderOnConfirm: true,
+                    inputValidator: (value) => {
+                        if (!value) {
+                            return 'You need to write something!'
+                        }
+                    },
+                    preConfirm: (message) => {
+                        // This function runs when the user clicks "Send Message"
+                        return fetch('/api/messages/send', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            receiver_id: listing.seller.id,
+                            listing_id: listingId,
+                            content: message
+                        }),
+                        credentials: 'same-origin'
+                        })
+                        .then(response => {
+                            if (!response.ok) throw new Error('Failed to send message');
+                            return response.json();
+                        })
+                        .catch(error => {
+                            Swal.showValidationMessage(`Request failed: ${error.message}`);
+                        });
+                    },
+                    allowOutsideClick: () => !Swal.isLoading()
+                });
+                
+                if (message) {
+                    // This runs after the message was successfully sent
+                    Swal.fire({
+                        title: 'Message Sent!',
+                        text: 'Your message has been sent to the seller.',
+                        icon: 'success',
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                    
+                    // Optionally, you can open the chat modal to show the conversation
+                    setTimeout(() => {
+                        const chatModal = new bootstrap.Modal(document.getElementById('chatModal'));
+                        chatModal.show();
+                        // This will find and open the chat with the seller
+                        setTimeout(() => {
+                            const chatItems = document.querySelectorAll('.chat-item');
+                            const sellerName = listing.seller.name;
+                            for (const item of chatItems) {
+                                if (item.querySelector('h6').textContent === sellerName) {
+                                    item.click();
+                                    break;
+                                }
+                            }
+                        }, 500);
+                    }, 2000);
+                }
+            } catch (error) {
+                console.error('Error contacting seller:', error);
+                showAlert('Error', error.message, 'error');
+            }
+        }
+        
+
+        async function addToWishlist(listingId) {
+            if (!currentUser) {
+                showAlert('Please Login', 'You need to login to add items to wishlist', 'warning');
+                return;
+            }
+            
+            try {
+                // Show loading state on the button if possible
+                const wishlistButton = event.target.closest('button');
+                if (wishlistButton) {
+                    const originalText = wishlistButton.innerHTML;
+                    wishlistButton.disabled = true;
+                    wishlistButton.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Adding...';
+                }
+                
+                const response = await fetch('/api/wishlist/add', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ listing_id: listingId }),
+                    credentials: 'same-origin'
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) throw new Error(data.error || 'Failed to add to wishlist');
+                
+                // Show success feedback
+                Swal.fire({
+                    title: 'Added to Wishlist!',
+                    text: data.message || 'Item has been added to your wishlist',
+                    icon: 'success',
+                    timer: 2000,
+                    showConfirmButton: false
+                });
+                
+                // Visual feedback on the button if it exists
+                if (wishlistButton) {
+                    wishlistButton.innerHTML = '<i class="fas fa-heart me-2"></i>Added to Wishlist';
+                    wishlistButton.classList.remove('btn-outline-primary');
+                    wishlistButton.classList.add('btn-success');
+                    
+                    // Disable the button to prevent multiple additions
+                    setTimeout(() => {
+                        wishlistButton.disabled = false;
+                    }, 2000);
+                }
+            } catch (error) {
+                console.error('Wishlist error:', error);
+                showAlert('Error', error.message, 'error');
+                
+                // Reset button if it exists
+                if (wishlistButton) {
+                    wishlistButton.disabled = false;
+                    wishlistButton.innerHTML = '<i class="fas fa-heart me-2"></i>Add to Wishlist';
+                }
+            }
+        }
+        function populateCollegeDropdowns() {
+            const sortedColleges = colleges.sort();
+            
+            // Populate registration form dropdown
+            const registerForm = document.getElementById('collegeSelect');
+            sortedColleges.forEach(college => {
+                const option = document.createElement('option');
+                option.value = college;
+                option.textContent = college;
+                registerForm.appendChild(option);
+            });
+        
+            // Populate search filter dropdown
+            const filterSelect = document.getElementById('collegeFilter');
+            sortedColleges.forEach(college => {
+                const option = document.createElement('option');
+                option.value = college;
+                option.textContent = college;
+                filterSelect.appendChild(option);
+            });
+        }
+
+        
+        
+        
+
+        async function showMessages() {
+            if (!currentUser) {
+                showAlert('Please Login', 'You need to login to view your messages', 'warning');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/messages', {
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) throw new Error('Failed to fetch messages');
+                
+                const data = await response.json();
+                
+                const messagesHtml = data.messages.map(message => {
+                    const repliesHtml = message.replies.map(reply => `
+                        <div class="card-body border-start border-primary ms-4 mt-2">
+                            <h6 class="card-subtitle mb-2 text-muted">
+                                Reply from ${reply.sender.name}
+                            </h6>
+                            <p class="card-text">${reply.content}</p>
+                            <p class="card-text">
+                                <small class="text-muted">
+                                    ${new Date(reply.created_at).toLocaleString()}
+                                </small>
+                            </p>
+                        </div>
+                    `).join('');
+                    
+                    return `
+                        <div class="card mb-3 ${message.sender.id === currentUser.id ? 'border-primary' : 'border-success'}">
+                            <div class="card-body">
+                                <h6 class="card-subtitle mb-2 text-muted">
+                                    ${message.sender.id === currentUser.id ? 'Sent to' : 'From'}: 
+                                    ${message.sender.id === currentUser.id ? message.receiver.name : message.sender.name}
+                                </h6>
+                                <p class="card-text">${message.content}</p>
+                                <p class="card-text">
+                                    <small class="text-muted">
+                                        Re: ${message.listing.title}
+                                        <br>
+                                        ${new Date(message.created_at).toLocaleString()}
+                                    </small>
+                                </p>
+                                <button class="btn btn-sm btn-primary" onclick="replyToMessage(${message.id}, '${message.sender.id === currentUser.id ? message.receiver.name : message.sender.name}')">
+                                    <i class="fas fa-reply me-2"></i>Reply
+                                </button>
+                            </div>
+                            ${repliesHtml}
+                        </div>
+                    `;
+                }).join('');
+                
+                Swal.fire({
+                    title: 'My Messages',
+                    html: `<div class="messages-container">${messagesHtml}</div>`,
+                    width: '80%',
+                    confirmButtonText: 'Close'
+                });
+            } catch (error) {
+                showAlert('Error', error.message, 'error');
+            }
+        }
+        
+        async function replyToMessage(messageId, recipientName) {
+            try {
+                const { value: content } = await Swal.fire({
+                    title: `Reply to ${recipientName}`,
+                    input: 'textarea',
+                    inputLabel: 'Your reply',
+                    inputPlaceholder: 'Type your reply here...',
+                    showCancelButton: true,
+                    inputValidator: (value) => {
+                        if (!value) {
+                            return 'You need to write something!';
+                        }
+                    }
+                });
+                
+                if (content) {
+                    const response = await fetch('/api/messages/reply', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            parent_message_id: messageId,
+                            content: content
+                        }),
+                        credentials: 'same-origin'
+                    });
+                    
+                    if (!response.ok) throw new Error('Failed to send reply');
+                    
+                    showAlert('Success', 'Reply sent successfully', 'success');
+                    showMessages(); // Refresh the messages view
+                }
+            } catch (error) {
+                showAlert('Error', error.message, 'error');
+            }
+        }
+
+        // Check session status on page load
+        async function checkSession() {
+            try {
+                const response = await fetch('/check-session', {
+                    credentials: 'same-origin'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.authenticated) {
+                        currentUser = data.user;
+                        
+                        // Clear any existing admin status in localStorage first
+                        if (!currentUser.is_admin) {
+                            localStorage.removeItem('isAdmin');
+                            localStorage.removeItem('adminDashboardOpen');
+                            console.log("Cleared admin status from localStorage for non-admin user");
+                        } else {
+                            // Only set admin status if the current authenticated user is an admin
+                            localStorage.setItem('isAdmin', 'true');
+                            console.log("Admin status stored in localStorage");
+                        }
+                        
+                        updateAuthUI();
+                        
+                        // Only use localStorage admin status if the user is actually an admin
+                        // This prevents a non-admin from getting admin privileges
+                        if (localStorage.getItem('isAdmin') === 'true' && currentUser.is_admin) {
+                            console.log("Admin status confirmed, enabling admin features");
+                            
+                            // Show admin elements right away
+                            document.getElementById('adminMenu').classList.remove('d-none');
+                            document.getElementById('reportsMenu').classList.remove('d-none');
+                            
+                            // If the adminDashboardModal was open before refresh, reopen it
+                            if (localStorage.getItem('adminDashboardOpen') === 'true') {
+                                console.log("Reopening admin dashboard after refresh");
+                                setTimeout(() => {
+                                    showAdminDashboard();
+                                }, 500);
+                            }
+                        }
+                        
+                        // If page is loaded with admin flag, show dashboard only if user is admin
+                        const urlParams = new URLSearchParams(window.location.search);
+                        if (urlParams.get('admin') === 'true' && currentUser.is_admin) {
+                            showAdminDashboard();
+                        }
+                    } else {
+                        // Not authenticated, clear any admin status
+                        localStorage.removeItem('isAdmin');
+                        localStorage.removeItem('adminDashboardOpen');
+                    }
+                }
+            } catch (error) {
+                console.error('Session check failed:', error);
+            }
+        }
+
+        // Event Listeners
+        // Modify your DOMContentLoaded event listener
+        document.addEventListener('DOMContentLoaded', () => {
+            const collegeFilter = document.getElementById('collegeFilter');
+            if (currentUser && currentUser.college) {
+                collegeFilter.value = currentUser.college;
+            }
+            
+            // Add event listener for college filter change
+            collegeFilter.addEventListener('change', function() {
+                loadListings();
+            });
+        
+            // Create skeleton loading cards
+            const skeleton = document.getElementById('loadingSkeleton');
+            for (let i = 0; i < 8; i++) {
+                skeleton.innerHTML += `
+                <div class="col-md-4 col-lg-3">
+                    <div class="listing-card">
+                        <div class="skeleton-loading" style="height: 200px;"></div>
+                        <div class="listing-content">
+                            <div class="skeleton-loading" style="height: 24px; width: 80%; margin-bottom: 12px;"></div>
+                            <div class="skeleton-loading" style="height: 18px; width: 60%; margin-bottom: 12px;"></div>
+                            <div class="skeleton-loading" style="height: 18px; width: 40%; margin-bottom: 12px;"></div>
+                        </div>
+                    </div>
+                </div>
+                `;
+            }
+        
+            // Check if user is logged in
+            checkSession();
+            populateCollegeDropdowns();
+           
+            // Add event listeners for search and filters
+            document.getElementById('searchInput').addEventListener('input', debounce(loadListings, 500));
+            document.getElementById('categoryFilter').addEventListener('change', loadListings);
+            document.getElementById('sortFilter').addEventListener('change', loadListings);
+            document.getElementById('collegeFilter').addEventListener('change', loadListings);
+        
+            // Initialize my listings page if we're on that page
+            initializeMyListingsPage();
+            
+            // Initialize wishlist page if we're on that page
+            initializeWishlistPage();
+        });
+        async function showMyListings() {
+            if (!currentUser) {
+                showAlert('Please Login', 'You need to login to view your listings', 'warning');
+                return;
+            }
+            // Open in new tab
+            window.open('/my-listings', '_blank');
+        }
+
+        // Add this function to handle the my-listings page load
+        function initializeMyListingsPage() {
+            if (window.location.pathname === '/my-listings') {
+              const heroSection = document.querySelector('.hero-section');
+              const searchSection = document.querySelector('.search-section');
+              const listingsSection = document.getElementById('listingsSection');
+              
+              if (heroSection) heroSection.style.display = 'none';
+              if (searchSection) searchSection.style.display = 'none';
+              if (listingsSection) listingsSection.style.display = 'block';
+              
+              // Show loading state
+              const listingsGrid = document.getElementById('listingsGrid');
+              if (listingsGrid) {
+                listingsGrid.innerHTML = '<div class="text-center w-100 py-5"><i class="fas fa-spinner fa-spin fa-2x"></i></div>';
+                
+                // Load my listings
+                fetch('/api/my-listings', {
+                  credentials: 'same-origin'
+                })
+                .then(response => response.json())
+                .then(data => {
+                  // Create the header with title and create button
+                  listingsGrid.innerHTML = `
+                    <div class="col-12 mb-4">
+                      <div class="d-flex justify-content-between align-items-center">
+                        <h2 class="mb-0">My Listings</h2>
+                        <button class="btn btn-primary" onclick="showCreateListing()">
+                          <i class="fas fa-plus-circle me-2"></i>Create New Listing
+                        </button>
+                      </div>
+                    </div>
+                  `;
+                  
+                  if (data.listings.length === 0) {
+                    listingsGrid.innerHTML += `
+                      <div class="col-12 text-center">
+                        <div class="alert alert-info">
+                          <i class="fas fa-info-circle me-2"></i>
+                          You haven't created any listings yet.
+                        </div>
+                      </div>
+                    `;
+                    return;
+                  }
+                  
+                  // Add each listing to the grid
+                  data.listings.forEach(listing => {
+                    const imageUrl = listing.image_url.startsWith('http') ? 
+                      listing.image_url : `/static/${listing.image_url}`;
+                    
+                    listingsGrid.innerHTML += `
+                      <div class="col-md-4 mb-4">
+                        <div class="card h-100">
+                          <img src="${imageUrl}" class="card-img-top" alt="${listing.title}" 
+                            style="height: 200px; object-fit: cover;">
+                          <div class="card-body">
+                            <h5 class="card-title">${listing.title}</h5>
+                            <p class="card-text text-muted">₹${listing.price}</p>
+                            <p class="card-text">${listing.description.substring(0, 100)}${listing.description.length > 100 ? '...' : ''}</p>
+                            <div class="d-flex gap-2 mb-3">
+                              <span class="badge bg-primary">${listing.category}</span>
+                              <span class="badge bg-secondary">${listing.condition}</span>
+                            </div>
+                            <div class="d-flex gap-2">
+                              
+                              <button class="btn btn-outline-danger btn-sm flex-grow-1" 
+                                onclick="deleteListing(${listing.id})">
+                                <i class="fas fa-trash me-2"></i>Delete
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    `;
+                  });
+                })
+                .catch(error => {
+                  showAlert('Error', error.message, 'error');
+                });
+              }
+            }
+          }
+        
+        async function showWishlist() {
+            if (!currentUser) {
+                showAlert('Please Login', 'You need to login to view your wishlist', 'warning');
+                return;
+            }
+            
+            // Redirect to the wishlist page
+            window.location.href = '/my-wishlist';
+        }
+        
+        // Add this function to handle the wishlist page initialization
+        function initializeWishlistPage() {
+            if (window.location.pathname === '/my-wishlist') {
+                const heroSection = document.querySelector('.hero-section');
+                const searchSection = document.querySelector('.search-section');
+                
+                if (heroSection) heroSection.style.display = 'none';
+                if (searchSection) searchSection.style.display = 'none';
+                
+                // Show loading state
+                const listingsGrid = document.getElementById('listingsGrid');
+                if (listingsGrid) {
+                    listingsGrid.innerHTML = '<div class="text-center w-100 py-5"><i class="fas fa-spinner fa-spin fa-2x"></i></div>';
+                    
+                    // Load wishlist items
+                    fetch('/api/wishlist', {
+                        credentials: 'same-origin'
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        // Create the header with title
+                        listingsGrid.innerHTML = `
+                        <div class="col-12 mb-4">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h2 class="mb-0">My Wishlist</h2>
+                            </div>
+                        </div>
+                        `;
+                        
+                        if (data.items.length === 0) {
+                            listingsGrid.innerHTML += `
+                            <div class="col-12 text-center">
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    Your wishlist is empty. Browse listings to add items to your wishlist.
+                                </div>
+                            </div>
+                            `;
+                            return;
+                        }
+                        
+                        // Add each wishlist item to the grid
+                        data.items.forEach(item => {
+                            const imageUrl = item.listing.image_url.startsWith('http') ? 
+                                item.listing.image_url : `/static/${item.listing.image_url}`;
+                            
+                            listingsGrid.innerHTML += `
+                            <div class="col-md-4 mb-4">
+                                <div class="card h-100">
+                                    <img src="${imageUrl}" class="card-img-top" alt="${item.listing.title}" 
+                                        style="height: 200px; object-fit: cover;">
+                                    <div class="card-body">
+                                        <h5 class="card-title">${item.listing.title}</h5>
+                                        <p class="card-text text-muted">₹${item.listing.price}</p>
+                                        <p class="card-text">Seller: ${item.listing.seller.name}</p>
+                                        <div class="d-flex gap-2">
+                                            <button class="btn btn-primary btn-sm flex-grow-1" 
+                                                onclick="contactSeller(${item.listing.id})">
+                                                <i class="fas fa-envelope me-2"></i>Contact Seller
+                                            </button>
+                                            <button class="btn btn-danger btn-sm flex-grow-1" 
+                                                onclick="removeFromWishlist(${item.id})">
+                                                <i class="fas fa-trash me-2"></i>Remove
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            `;
+                        });
+                    })
+                    .catch(error => {
+                        showAlert('Error', error.message, 'error');
+                    });
+                }
+            }
+        }
+        
+        // Add this function to remove items from wishlist
+        async function removeFromWishlist(wishlistId) {
+            try {
+                const result = await Swal.fire({
+                    title: 'Remove from Wishlist',
+                    text: 'Are you sure you want to remove this item from your wishlist?',
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonColor: '#d33',
+                    cancelButtonColor: '#3085d6',
+                    confirmButtonText: 'Yes, remove it!'
+                });
+                
+                if (result.isConfirmed) {
+                    const response = await fetch(`/api/wishlist/${wishlistId}`, {
+                        method: 'DELETE',
+                        credentials: 'same-origin'
+                    });
+                    
+                    if (!response.ok) {
+                        const data = await response.json();
+                        throw new Error(data.error || 'Failed to remove from wishlist');
+                    }
+                    
+                    Swal.fire(
+                        'Removed!',
+                        'The item has been removed from your wishlist.',
+                        'success'
+                    );
+                    
+                    // Refresh the wishlist page
+                    initializeWishlistPage();
+                }
+            } catch (error) {
+                showAlert('Error', error.message, 'error');
+            }
+        }
+        
+        function viewListing(listingId) {
+            // Fetch the listing details
+            fetch(`/listings?id=${listingId}`, {
+            credentials: 'same-origin'
+            })
+            .then(response => {
+            if (!response.ok) throw new Error('Failed to fetch listing details');
+            return response.json();
+            })
+            .then(data => {
+            if (!data.listings || data.listings.length === 0) {
+                throw new Error('Listing not found');
+            }
+            
+            const listing = data.listings[0];
+            
+            // Create a modal to display the listing details
+            Swal.fire({
+                title: listing.title,
+                html: `
+                <div class="text-center mb-3">
+                    <img src="${listing.image_url.startsWith('http') ? listing.image_url : `/static/${listing.image_url}`}" 
+                        class="img-fluid rounded" style="max-height: 300px;" alt="${listing.title}">
+                </div>
+                <div class="text-start">
+                    <p class="mb-2"><strong>Price:</strong> ₹${listing.price}</p>
+                    <p class="mb-2"><strong>Category:</strong> ${listing.category}</p>
+                    <p class="mb-2"><strong>Condition:</strong> ${listing.condition}</p>
+                    <p class="mb-2"><strong>Seller:</strong> ${listing.seller.name}</p>
+                    <p class="mb-2"><strong>Description:</strong> ${listing.description}</p>
+                </div>
+                `,
+                width: '600px',
+                showCancelButton: true,
+                confirmButtonText: 'Contact Seller',
+                cancelButtonText: 'Close'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                contactSeller(listing.id);
+                }
+            });
+            })
+            .catch(error => {
+            console.error('Error viewing listing:', error);
+            showAlert('Error', error.message, 'error');
+            });
+        }
+        async function deleteListing(listingId) {
+            try {
+            // Confirm before deleting
+            const result = await Swal.fire({
+                title: 'Delete Listing?',
+                text: 'Are you sure you want to delete this listing? This action cannot be undone.',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                cancelButtonColor: '#3085d6',
+                confirmButtonText: 'Yes, delete it!'
+            });
+            
+            if (result.isConfirmed) {
+                // Show loading state
+                Swal.fire({
+                title: 'Deleting...',
+                text: 'Please wait while we delete your listing.',
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading();
+                }
+                });
+                
+                const response = await fetch(`/api/listings/${listingId}`, {
+                method: 'DELETE',
+                credentials: 'same-origin'
+                });
+                
+                if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.error || 'Failed to delete listing');
+                }
+                
+                // Show success message
+                Swal.fire({
+                title: 'Deleted!',
+                text: 'Your listing has been deleted successfully.',
+                icon: 'success',
+                timer: 2000,
+                showConfirmButton: false
+                });
+                
+                // Refresh the listings
+                if (window.location.pathname === '/my-listings') {
+                initializeMyListingsPage();
+                }
+            }
+            } catch (error) {
+            console.error('Error deleting listing:', error);
+            Swal.fire({
+                title: 'Error',
+                text: error.message,
+                icon: 'error'
+            });
+            }
+        }
+        
+        // Function to delete a listing
+        
+        // Form submission handlers with enhanced error handling and validation
+        document.getElementById('loginForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const originalButtonText = submitBtn.innerHTML;
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Logging in...';
+            
+            try {
+                const formData = new FormData(this);
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Store user data including admin status
+                    currentUser = data.user;
+                    sessionStorage.setItem('user', JSON.stringify(data.user));
+                    
+                    // Manage admin status in localStorage based on user's role
+                    if (data.user.is_admin) {
+                        localStorage.setItem('isAdmin', 'true');
+                    } else {
+                        // Clear admin status if user is not an admin
+                        localStorage.removeItem('isAdmin');
+                        localStorage.removeItem('adminDashboardOpen');
+                    }
+                    
+                    // Close the login modal
+                    const loginModal = bootstrap.Modal.getInstance(document.getElementById('loginModal'));
+                    if (loginModal) {
+                        loginModal.hide();
+                    }
+                    
+                    // Show success message
+                    let successMessage = 'Welcome back, ' + data.user.full_name + '!';
+                    if (data.user.is_admin) {
+                        successMessage += ' (Admin Mode)';
+                    }
+                    
+                    Swal.fire({
+                        title: 'Login Successful!',
+                        text: successMessage,
+                        icon: 'success',
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                    
+                    // Update UI based on user role
+                    updateAuthUI();
+                    
+                    // If admin, show admin dashboard after login
+                    if (data.user.is_admin) {
+                        setTimeout(() => {
+                            showAdminDashboard('reports');
+                        }, 2000);
+                    }
+                    
+                    // Reset the form
+                    this.reset();
+                    
+                } else {
+                    // Handle login errors
+                    Swal.fire({
+                        title: 'Login Error',
+                        text: data.error || 'Invalid credentials. Please try again.',
+                        icon: 'error'
+                    });
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                Swal.fire({
+                    title: 'Error',
+                    text: 'An unexpected error occurred. Please try again.',
+                    icon: 'error'
+                });
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalButtonText;
+            }
+        });
+        const colleges = [
+            "Anantha Lakshmi Institute of Technology and Sciences",
+            "Balaji College of Pharmacy",
+            "Chiranjeevi Reddy Institute of Engineering and Technology",
+            "Gates Institute of Technology",
+            "Intell Engineering College",
+            "PVKK Institute of Technology",
+            "Raghavendra Institute of Pharmaceutical Education and Research",
+            "Sri Krishna Devaraya Engineering College",
+            "Sri Venkateswara Institute of Technology",
+            "Srinivasa Ramanujan Institute of Technology",
+            "Aditya College of Engineering",
+            "Annamacharya Institute of Technology and Sciences",
+            "Mother Theresa Institute of Engineering and Technology",
+            "Siddharth Institute of Engineering and Technology",
+            "Sree Vidyanikethan Engineering College",
+            "Sri Venkateswara College of Engineering and Technology",
+            "Sri Venkateswara Engineering College for Women",
+            "Vemu Institute of Technology",
+            "Yogananda Institute of Technology and Science",
+            "Bheema Institute of Technology and Science",
+            "Dr. K.V. Subba Reddy Institute of Technology",
+            "G. Pulla Reddy Engineering College",
+            "G. Pullaiah College of Engineering and Technology",
+            "Kottam College of Engineering",
+            "Safa College of Engineering and Technology",
+            "St. Johns College of Engineering and Technology",
+            "Stanley Stephen College of Engineering and Technology",
+            "Syamaladevi Institute of Technology for Women",
+            "Rajeev Gandhi Memorial College of Engineering and Technology",
+            "Santhiram Engineering College",
+            "SVR Engineering College",
+            "Prabhath Institute of Pharmacy",
+            "Santhiram College of Pharmacy",
+            "Audisankara College of Engineering and Technology",
+            "Geethanjali Institute of Science and Technology",
+            "Narayana Engineering College",
+            "Priyadarshini College of Engineering",
+            "Quba College of Engineering and Technology",
+            "Rami Reddy Subbarami Reddy Engineering College",
+            "Sree Venkateswara College of Engineering",
+            "Visvodaya Engineering College",
+            "Balaji Institute of Technology and Science",
+            "Chaitanya Bharathi Institute of Technology",
+            "K.S.R.M. College of Engineering",
+            "Kandula Obula Reddy Memorial College of Engineering",
+            "Madanapalle Institute of Technology and Science",
+            "Vaagdevi Institute of Technology and Science",
+            "A V N COLLEGE",
+            "ABHINAV HI-TECH COLLEGE",
+            "ABR COLLEGE",
+            "ACE ENGINEERING COLLEGE",
+            "ACHARYA COLLEGE",
+            "ADAM'S ENGINEERING COLLEGE",
+            "ADARSH COLLEGE",
+            "ADITYA COLLEGE",
+            "ADITYA ENGINEERING COLLEGE",
+            "ADUSUMILLI VIJAYA COLLEGE",
+            "AIZZA COLLEGE",
+            "AKULA SREERAMULU COLLEGE",
+            "AL HABEEB COLLEGE",
+            "ALFA COLLEGE",
+            "ANDHRA UNIVERSITY COLLEGE",
+            "ANN'S COLLEGE",
+            "ANU COLLEGE",
+            "ANURAG COLLEGE",
+            "ANURAG ENGINEERING COLLEGE",
+            "ANWAR UL ULOOM COLLEGE",
+            "APEX ENGINEERING COLLEGE",
+            "ARIES POLYTECHNIC COLLEGE",
+            "ARJUN COLLEGE",
+            "ARKAY COLLEGE",
+            "ASIFIA COLLEGE",
+            "ATMAKUR ENGINEERING COLLEGE",
+            "AUDISANKARA COLLEGE",
+            "AURORA'S ENGINEERING COLLEGE",
+            "AVANTHI POLYTECHNIC COLLEGE",
+            "AVR&SVR COLLEGE",
+            "AVS COLLEGE",
+            "AWARE MADHAVANJI COLLEGE",
+            "AYAAN COLLEGE",
+            "AZAD COLLEGE",
+            "B V C COLLEGE",
+            "BANDARI SRINIVAS COLLEGE",
+            "BAPATLA ENGINEERING COLLEGE",
+            "BHAGATH COLLEGE",
+            "BHARATH COLLEGE",
+            "BHASKAR ENGINEERING COLLEGE",
+            "BRAHMAIAH COLLEGE",
+            "CHAITANYA ENGINEERING COLLEGE",
+            "CHEBROLU ENGINEERING COLLEGE",
+            "CHIRALA ENGINEERING COLLEGE",
+            "CHITTOOR POLYTECHNIC COLLEGE",
+            "CITY WOMENS COLLEGE",
+            "CMR COLLEGE",
+            "CMR ENGINEERING COLLEGE",
+            "CVR COLLEGE",
+            "DJR COLLEGE",
+            "DNR COLLEGE",
+            "DR LANKAPALLI BULLAYYA COLLEGE",
+            "DRK COLLEGE",
+            "DVR COLLEGE",
+            "ELENKI ENGINEERING COLLEGE",
+            "ELLENKI COLLEGE",
+            "ELURU COLLEGE",
+            "ENGINEERING COLLEGE",
+            "ESWAR COLLEGE",
+            "EVM COLLEGE",
+            "EVR COLLEGE",
+            "GANAPATHY COLLEGE",
+            "GAYATRI VIDYA PARISHAD COLLEGE",
+            "GEETHANJALI COLLEGE",
+            "GIET COLLEGE",
+            "GIET POLYTECHNIC COLLEGE",
+            "GLOBAL COLLEGE",
+            "GNYANA SARASWATI COLLEGE",
+            "GOKULA KRISHNA COLLEGE",
+            "GOPAL REDDY COLLEGE",
+            "GUNTUR ENGINEERING COLLEGE",
+            "HI-POINT COLLEGE",
+            "HIMA SEKHAR MIC COLLEGE",
+            "HINDU COLLEGE",
+            "INDIRA PRIYADARSHINI COLLEGE",
+            "INTELL ENGINEERING COLLEGE",
+            "JAGAN'S COLLEGE",
+            "JAYA PRAKASH NARAYAN COLLEGE",
+            "JNTUA COLLEGE",
+            "JNTUH COLLEGE",
+            "JOHNS COLLEGE",
+            "JYOTHISHMATHI COLLEGE",
+            "KAMAKSHI COLLEGE",
+            "KANAKARAJU COLLEGE",
+            "KAUSHIK COLLEGE",
+            "KBR ENGINEERING COLLEGE",
+            "KHADER MEMORIAL COLLEGE",
+            "KIMS COLLEGE",
+            "KITE COLLEGE",
+            "KITE WOMEN'S COLLEGE",
+            "KLR COLLEGE",
+            "KOTTAM COLLEGE",
+            "KSHATRIYA COLLEGE",
+            "KUPPAM ENGINEERING COLLEGE",
+            "LAKIREDDY BALI REDDY COLLEGE",
+            "LENORA COLLEGE",
+            "MADHIRA COLLEGE",
+            "MADINA ENGINEERING COLLEGE",
+            "MALLA REDDY COLLEGE",
+            "MALLIKARJUNA RAO COLLEGE",
+            "MARY'S ENGINEERING COLLEGE",
+            "MATRUSRI ENGINEERING COLLEGE",
+            "MEDAK COLLEGE",
+            "MEDHA COLLEGE",
+            "MEMORIAL COLLEGE",
+            "MEMORIAL POLYTECHNIC COLLEGE",
+            "MENTEY PADMANABHAM COLLEGE",
+            "METHODIST COLLEGE",
+            "MILITARY COLLEGE",
+            "MJR COLLEGE",
+            "MNR COLLEGE",
+            "MOGHAL COLLEGE",
+            "MOHMMEDENS COLLEGE",
+            "MONA COLLEGE",
+            "MOTHER THERESSA COLLEGE",
+            "MUFFAKHAM JAH COLLEGE",
+            "MUMTAZ COLLEGE",
+            "MVR COLLEGE",
+            "N COLLEGE",
+            "NARAYANA ENGINEERING COLLEGE",
+            "NAWAB SHAH ALAM KHAN COLLEGE",
+            "NEW INDIA COLLEGE",
+            "NEXUS COLLEGE",
+            "NIGAMA ENGINEERING COLLEGE",
+            "NIMRA COLLEGE",
+            "NIMRA WOMEN'S COLLEGE",
+            "NISHITHA COLLEGE",
+            "NOBLE COLLEGE",
+            "NOBLE POLYTECHNIC COLLEGE",
+            "NOOR COLLEGE",
+            "NOVA COLLEGE",
+            "P COLLEGE",
+            "PALADUGU PARVATHI DEVI COLLEGE",
+            "PETER'S ENGINEERING COLLEGE",
+            "PRAGATI ENGINEERING COLLEGE",
+            "PRAKASAM ENGINEERING COLLEGE",
+            "PRASAD ENGINEERING COLLEGE",
+            "PRASIDDHA COLLEGE",
+            "PRINCETON COLLEGE",
+            "PRIYADARSHINI COLLEGE",
+            "PUJYA SHRI MADHAVANJI COLLEGE",
+            "PULLAIAH COLLEGE",
+            "PYDAH COLLEGE",
+            "QIS COLLEGE",
+            "QUBA COLLEGE",
+            "R & S COLLEGE",
+            "RAGHU ENGINEERING COLLEGE",
+            "RAJ COLLEGE",
+            "RAJA MAHENDRA COLLEGE",
+            "RAMA REDDY COLLEGE",
+            "RAMACHANDRA COLLEGE",
+            "RAMAPPA ENGINEERING COLLEGE",
+            "RAVINDRA COLLEGE",
+            "REDDY COLLEGE",
+            "REDDY MEMORIAL COLLEGE",
+            "RRS COLLEGE",
+            "S COLLEGE",
+            "S R ENGINEERING COLLEGE",
+            "SAHASRA COLLEGE",
+            "SAI SAKTHI ENGINEERING COLLEGE",
+            "SAMSKRUTI COLLEGE",
+            "SANA ENGINEERING COLLEGE",
+            "SANKETIKA POLYTECHNIC COLLEGE",
+            "SANTHIRAM ENGINEERING COLLEGE",
+            "SHAAZ COLLEGE",
+            "SHADAN COLLEGE",
+            "SHADAN WOMEN'S COLLEGE",
+            "SHAHJEHAN COLLEGE",
+            "SHIVA RAMA KRISHNA COLLEGE",
+            "SIR C R REDDY COLLEGE",
+            "SKR COLLEGE",
+            "SRADDAHA COLLEGE",
+            "SREE CHAITANYA COLLEGE",
+            "SREE RAMA ENGINEERING COLLEGE",
+            "SREE VENKATESWARA COLLEGE",
+            "SREENIVASA COLLEGE",
+            "SRI ADITYA ENGINEERING COLLEGE",
+            "SRI INDU COLLEGE",
+            "SRI MITTAPALLI COLLEGE",
+            "SRI PRAKASH COLLEGE",
+            "SRI SAI COLLEGE",
+            "SRI SATYA NARAYANA COLLEGE",
+            "SRI SIVANI COLLEGE",
+            "SRI SUNFLOWER COLLEGE",
+            "SRI VAISHNAVI COLLEGE",
+            "SRI VASAVI ENGINEERING COLLEGE",
+            "SRI VENKATESA PERUMAL COLLEGE",
+            "SRI VENKATESWARA COLLEGE",
+            "SRI YPR COLLEGE",
+            "SRR ENGINEERING COLLEGE",
+            "SRUJANA COLLEGE",
+            "STANLEY COLLEGE",
+            "STANLEY STEPHEN COLLEGE",
+            "SUBBA REDDY COLLEGE",
+            "SUDHEER REDDY COLLEGE",
+            "SUJANA COLLEGE",
+            "SUPRABHATH COLLEGE",
+            "SWARNA BHARATHI COLLEGE",
+            "SWARNANDHRA COLLEGE",
+            "SYED HASHIM COLLEGE",
+            "TADIPATRI ENGINEERING COLLEGE",
+            "TALLA PADMAVATHI COLLEGE",
+            "TECHNOLOGY - COLLEGE",
+            "TECHNOLOGY-COLLEGE",
+            "TENALI ENGINEERING COLLEGE",
+            "THE VAZIR SULTAN COLLEGE",
+            "THE YOUNIS SULTAN COLLEGE",
+            "TIRUMALA COLLEGE",
+            "TIRUMALA ENGINEERING COLLEGE",
+            "TKR COLLEGE",
+            "TRAINING COLLEGE",
+            "TRINITY COLLEGE",
+            "TRR COLLEGE",
+            "TRR ENGINEERING COLLEGE",
+            "UNIVERSAL COLLEGE",
+            "UNIVERSITY COLLEGE",
+            "USHA RAMA COLLEGE",
+            "VAAGDEVI COLLEGE",
+            "VAAGDEVI ENGINEERING COLLEGE",
+            "VAAGESWARI COLLEGE",
+            "VARADHA REDDY COLLEGE",
+            "VARDHAMAN COLLEGE",
+            "VASAVI COLLEGE",
+            "VELAGA NAGESWARA RAO COLLEGE",
+            "VENKATESWARA HINDU COLLEGE",
+            "VIF COLLEGE",
+            "VIJAY COLLEGE",
+            "VIJAYA ENGINEERING COLLEGE",
+            "VIKAS COLLEGE",
+            "VIKAS POLYTECHNIC COLLEGE",
+            "VISAKA ENGINEERING COLLEGE",
+            "VISHWA BHARATHI COLLEGE",
+            "VISHWABHARATHI PG COLLEGE",
+            "VISVESVARAYA COLLEGE",
+            "VISVODAYA ENGINEERING COLLEGE",
+            "VRK COLLEGE",
+            "VRK WOMENS COLLEGE",
+            "YALAMARTY COLLEGE"
+        ];
+
+        // In the register form submit handler in index.html
+        document.getElementById('registerForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const termsCheckbox = document.getElementById('acceptTerms');
+            if (!termsCheckbox.checked) {
+                Swal.fire({
+                    title: 'Terms Not Accepted',
+                    text: 'You must accept the Terms and Conditions to register',
+                    icon: 'error',
+                    confirmButtonColor: '#2563eb'
+                });
+                return;
+            }
+            
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const originalButtonText = submitBtn.innerHTML;
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Registering...';
+                
+            try {
+                const formData = new FormData(this);
+                const response = await fetch('/register', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Close the register modal
+                    const registerModal = bootstrap.Modal.getInstance(document.getElementById('registerModal'));
+                    if (registerModal) {
+                        registerModal.hide();
+                    }
+                    
+                    // Show success message with verification instructions
+                    Swal.fire({
+                        title: 'Registration Successful!',
+                        text: 'Please check your email to verify your account before logging in.',
+                        icon: 'success',
+                        confirmButtonText: 'OK'
+                    });
+                    
+                    // Reset the form
+                    this.reset();
+                } else {
+                    Swal.fire({
+                        title: 'Registration Error',
+                        text: data.error || 'Failed to register. Please try again.',
+                        icon: 'error'
+                    });
+                }
+            } catch (error) {
+                console.error('Registration error:', error);
+                Swal.fire({
+                    title: 'Error',
+                    text: 'An unexpected error occurred. Please try again.',
+                    icon: 'error'
+                });
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalButtonText;
+            }
+        });
+        // Function to toggle rent/sell fields
+        function toggleRentFields() {
+            const listingType = document.getElementById('listingType').value;
+            const rentFields = document.querySelectorAll('.rent-field');
+            const sellPriceField = document.getElementById('sellPriceField');
+            
+            if (listingType === 'rent') {
+                // Show rent fields, hide sell price field
+                rentFields.forEach(field => field.style.display = 'block');
+                sellPriceField.style.display = 'none';
+                
+                // Make rent fields required, sell price not required
+                document.querySelector('input[name="rent_price"]').required = true;
+                document.querySelector('input[name="rent_tenure"]').required = true;
+                document.querySelector('input[name="price"]').required = false;
+            } else {
+                // Hide rent fields, show sell price field
+                rentFields.forEach(field => field.style.display = 'none');
+                sellPriceField.style.display = 'block';
+                
+                // Make sell price required, rent fields not required
+                document.querySelector('input[name="price"]').required = true;
+                document.querySelector('input[name="rent_price"]').required = false;
+                document.querySelector('input[name="rent_tenure"]').required = false;
+            }
+        }
+        // Add to your existing JavaScript
+        
+
+        
+        
+
+        // Utility function for debouncing
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+        const productTypes = {
+            'electronic': ['Mobile', 'laptop','calci'],            'books': ['Text books', 'class book','running notes'],
+            'clothes': ['Casual', 'Formal','Apron']
+        };
+        const categoryFields = {
+            'electronic': {
+                productTypes: ['Mobile', 'laptop', 'calci'],
+                requiredFields: ['working_condition', 'warranty_status']
+            },
+            'books': {
+                productTypes: ['Text books', 'class book', 'running notes'],
+                requiredFields: ['subject', 'branch','softcopy']
+            },
+            'clothes': {
+                productTypes: ['Casual', 'Formal', 'Apron'],
+                requiredFields: []
+            }
+        };
+        
+        // Image preview handler
+        document.querySelector('input[name="image"]').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const preview = document.getElementById('imagePreview');
+                    preview.style.display = 'block';
+                    preview.querySelector('img').src = e.target.result;
+                }
+                reader.readAsDataURL(file);
+            }
+        });
+        
+        // Category change handler
+        document.getElementById('listingCategory').addEventListener('change', function() {
+            const category = this.value;
+            const productTypeSelect = document.getElementById('productType');
+            
+    // Show/hide fields based on category
+            document.querySelector('.field-branch').style.display = category === 'books' ? 'block' : 'none';
+            document.querySelector('.field-subject').style.display = category === 'books' ? 'block' : 'none';
+            document.querySelector('.field-faculty').style.display = category === 'books' ? 'block' : 'none';
+            document.querySelector('.field-softcopy').style.display = category === 'books' ? 'block' : 'none';
+            
+            // Update product types
+            productTypeSelect.innerHTML = '<option value="">Select Product Type</option>';
+            if (categoryFields[category]?.productTypes) {
+                categoryFields[category].productTypes.forEach(type => {
+                    const option = document.createElement('option');
+                    option.value = type.toLowerCase();
+                    option.textContent = type;
+                    productTypeSelect.appendChild(option);
+                });
+            }
+            
+            
+            // Show/hide fields based on category
+            const allFields = {
+                'working_condition': document.querySelector('.field-working-condition'),
+                'warranty_status': document.querySelector('.field-warranty'),
+                'subject': document.querySelector('.field-subject'),
+                'branch': document.querySelector('.field-branch')
+            };
+            
+            // Hide all fields first
+            Object.values(allFields).forEach(field => {
+                if (field) {
+                    field.style.display = 'none';
+                    // Remove required attribute
+                    const input = field.querySelector('input, select');
+                    if (input) input.required = false;
+                }
+            });
+            
+            // Show required fields for selected category
+            const requiredFields = categoryFields[category]?.requiredFields || [];
+            requiredFields.forEach(fieldName => {
+                const field = allFields[fieldName];
+                if (field) {
+                    field.style.display = 'block';
+                    // Make the field required
+                    const input = field.querySelector('input, select');
+                    if (input) input.required = true;
+                }
+                if (fieldName === 'softcopy') {
+                    document.querySelector('.field-softcopy').style.display = 'block';
+                }
+            });
+        });
+        function toggleFileUpload() {
+            const isSoftCopy = document.getElementById('softCopy').checked;
+            document.querySelector('.field-fileupload').style.display = isSoftCopy ? 'block' : 'none';
+            if (isSoftCopy) {
+                document.querySelector('input[name="document"]').required = true;
+            } else {
+                document.querySelector('input[name="document"]').required = false;
+            }
+        }
+        
+        // Modify the existing createListingForm submit handler
+        // Modify the existing createListingForm submit handler
+        document.getElementById('createListingForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            try {
+                if (!currentUser) {
+                    throw new Error('You must be logged in to create a listing');
+                }
+                
+                // Validate checkbox
+                if (!this.querySelector('[name="is_fake_warning"]').checked) {
+                    throw new Error('You must confirm that the product is genuine');
+                }
+                
+                const category = this.querySelector('[name="category"]').value;
+                const listingType = this.querySelector('[name="listing_type"]').value;
+                const formData = new FormData(this);
+                
+                // Set is_for_rent based on listing type
+                formData.append('is_for_rent', listingType === 'rent' ? 'true' : 'false');
+                
+                // If it's a rental listing, ensure price is set to 0 or a minimal value
+                if (listingType === 'rent') {
+                    formData.set('price', '0');
+                }
+                
+                // Make sure study_year is included
+                const academicYear = document.getElementById('academicYear').value;
+                if (academicYear) {
+                    formData.set('study_year', academicYear);
+                }
+                
+                // Show loading state
+                const submitBtn = this.querySelector('button[type="submit"]');
+                const originalBtnText = submitBtn.innerHTML;
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Creating...';
+                
+                const response = await fetch('/create-listing', {
+                    method: 'POST',
+                    body: formData,
+                    credentials: 'same-origin'
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Close modal
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('createListingModal'));
+                    modal.hide();
+                    
+                    // Show success message
+                    await Swal.fire({
+                        title: 'Success!',
+                        text: 'Your listing has been created successfully',
+                        icon: 'success',
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                    
+                    // Reset form
+                    this.reset();
+                    document.getElementById('imagePreview').style.display = 'none';
+                    
+                    // Force redirect to buy page
+                    handlePathSelection('buy');
+                    
+                } else {
+                    throw new Error(data.error || 'Failed to create listing');
+                }
+            } catch (error) {
+                console.error('Error creating listing:', error);
+                Swal.fire({
+                    title: 'Error',
+                    text: error.message,
+                    icon: 'error'
+                });
+            } finally {
+                // Reset button state
+                const submitBtn = this.querySelector('button[type="submit"]');
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="fas fa-plus-circle me-2"></i>Create Listing';
+                }
+            }
+        });
+        function showLoading() {
+            document.getElementById('loadingSkeleton').style.display = 'flex';
+            document.getElementById('listingsGrid').style.display = 'none';
+        }
+        
+        function hideLoading() {
+            document.getElementById('loadingSkeleton').style.display = 'none';
+            document.getElementById('listingsGrid').style.display = 'flex';
+        }
+        
+        // Alert function (if not already defined)
+        function showAlert(title, text, icon) {
+            Swal.fire({
+                title,
+                text,
+                icon,
+                confirmButtonColor: '#2563eb'
+            });
+        }
+        // Chat Management
+        // Chat Management
+        // Global variables
+        // Global variables
+        let currentChatUser = null;
+        let chatMessages = {};
+
+        // Function to initialize chat interface
+        function initializeChat() {
+            const messageInput = document.getElementById('messageInput');
+            const sendButton = document.getElementById('sendMessage');
+            const currentUserName = document.getElementById('currentUserName');
+
+            // Set current user name if available
+            if (currentUser && currentUser.full_name) {
+                currentUserName.textContent = currentUser.full_name;
+            }
+
+            // Handle send message
+            sendButton.addEventListener('click', () => sendMessage());
+            messageInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+
+            // Load initial chats
+            loadChats();
+        }
+
+        // Function to load all chats
+        async function loadChats() {
+            try {
+                const response = await fetch('/api/messages', {
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) throw new Error('Failed to load chats');
+                
+                const data = await response.json();
+                const chatList = document.getElementById('chatList');
+                chatList.innerHTML = '';
+
+                if (data.messages && data.messages.length > 0) {
+                    // Group messages by conversation
+                    const conversations = groupMessagesByConversation(data.messages);
+                    
+                    // Render each conversation in the sidebar
+                    conversations.forEach(conv => {
+                        const lastMessage = conv.messages[conv.messages.length - 1];
+                        const otherUser = lastMessage.sender_id === currentUser.id ? 
+                            lastMessage.receiver : lastMessage.sender;
+
+                        const chatItem = createChatListItem(otherUser, lastMessage);
+                        chatList.appendChild(chatItem);
+                    });
+                } else {
+                    // Show empty state
+                    chatList.innerHTML = `
+                        <div class="text-center text-muted p-3">
+                            <i class="fas fa-comments fa-2x mb-2"></i>
+                            <p>No conversations yet</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Error loading chats:', error);
+                showAlert('Error', error.message, 'error');
+            }
+        }
+
+        // Function to group messages by conversation
+        function groupMessagesByConversation(messages) {
+            const conversations = {};
+            
+            messages.forEach(message => {
+                const conversationId = [message.sender_id, message.receiver_id].sort().join('-');
+                
+                if (!conversations[conversationId]) {
+                    conversations[conversationId] = {
+                        messages: [],
+                        otherUserId: message.sender_id === currentUser.id ? 
+                            message.receiver_id : message.sender_id
+                    };
+                }
+                conversations[conversationId].messages.push(message);
+            });
+
+            return Object.values(conversations);
+        }
+
+        // Function to create a chat list item
+        function createChatListItem(user, lastMessage) {
+            const div = document.createElement('div');
+            div.className = 'chat-item';
+            div.innerHTML = `
+                <div class="d-flex align-items-center">
+                    <div class="user-avatar me-3">
+                        <img src="${user.profile_picture || 'https://via.placeholder.com/40'}" 
+                            class="rounded-circle" alt="${user.full_name}">
+                    </div>
+                    <div class="flex-grow-1">
+                        <h6 class="mb-1">${user.full_name}</h6>
+                        <p class="mb-0 text-muted small text-truncate">${lastMessage.content}</p>
+                    </div>
+                    <div class="text-muted small">
+                        ${formatMessageTime(lastMessage.created_at)}
+                    </div>
+                </div>
+            `;
+
+            div.addEventListener('click', () => {
+                // Remove active class from all chat items
+                document.querySelectorAll('.chat-item').forEach(item => {
+                    item.classList.remove('active');
+                });
+                
+                // Add active class to clicked item
+                div.classList.add('active');
+                
+                // Open the chat
+                openChat(user, lastMessage.listing_id);
+            });
+
+            return div;
+        }
+
+        // Function to open a chat
+// Function to open a chat
+        function openChat(user, listingId) {
+            currentChatUser = {
+                id: user.id,
+                listing_id: listingId,
+                full_name: user.full_name
+            };
+            
+            // Hide empty state and show chat content
+            const emptyState = document.querySelector('.chat-empty-state');
+            const chatContent = document.getElementById('chatContent');
+            
+            // Properly hide empty state and show chat content
+            if (emptyState) {
+                emptyState.style.display = 'none';
+            }
+            chatContent.style.display = 'flex'; // Change to flex instead of removing d-none
+            chatContent.classList.remove('d-none');
+            
+            // Update chat header
+            document.getElementById('chatContactName').textContent = user.full_name;
+            if (user.profile_picture) {
+                document.getElementById('chatContactAvatar').src = user.profile_picture;
+            }
+            
+            // Enable message input and focus it
+            const messageInput = document.getElementById('messageInput');
+            messageInput.disabled = false;
+            messageInput.value = ''; // Clear any existing text
+            messageInput.focus();
+            
+            // Load chat messages
+            loadChatMessages(user.id, listingId);
+            
+            // Add scroll button
+            addScrollButton();
+
+            // Update active chat in sidebar
+            updateActiveChatInSidebar(user.id);
+        }
+
+        // Add this new function to handle sidebar active state
+        function updateActiveChatInSidebar(userId) {
+            // Remove active class from all chat items
+            document.querySelectorAll('.chat-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            
+            // Add active class to the selected chat
+            const selectedChat = document.querySelector(`[data-user-id="${userId}"]`);
+            if (selectedChat) {
+                selectedChat.classList.add('active');
+            }
+        }
+
+        // Function to load chat messages
+        async function loadChatMessages(userId, listingId) {
+            try {
+                const response = await fetch(`/api/messages?other_user_id=${userId}&listing_id=${listingId}`, {
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load messages');
+                }
+                
+                const data = await response.json();
+                
+                // Remove duplicates and sort messages
+                const uniqueMessages = Array.from(
+                    new Map(data.messages.map(item => [item.id, item])).values()
+                ).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                
+                displayMessages(uniqueMessages);
+                
+            } catch (error) {
+                console.error('Error loading messages:', error);
+                showAlert('Error', error.message, 'error');
+            }
+        }
+
+        // Function to display messages
+        function displayMessages(messages) {
+            const chatMessages = document.getElementById('chatMessages');
+            const messageContainer = document.querySelector('.message-container');
+            messageContainer.innerHTML = '';
+            
+            // Store current scroll position and total height
+            const wasScrolledToBottom = chatMessages.scrollHeight - chatMessages.scrollTop === chatMessages.clientHeight;
+            
+            messages.forEach(message => {
+                const messageElement = createMessageElement(message);
+                messageContainer.appendChild(messageElement);
+            });
+            
+            // Scroll handling
+            if (wasScrolledToBottom) {
+                setTimeout(() => {
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                }, 100);
+            }
+        }
+
+        // Function to create a message element
+        function createMessageElement(message) {
+            const div = document.createElement('div');
+            const isSent = parseInt(message.sender_id) === parseInt(currentUser.id);
+            div.className = `message ${isSent ? 'sent' : 'received'}`;
+            
+            div.innerHTML = `
+                <div class="message-content">${message.content}</div>
+                <div class="message-time">
+                    ${formatMessageTime(message.created_at)}
+                    ${isSent ? `<i class="fas fa-check-double ${message.read ? 'text-primary' : ''}"></i>` : ''}
+                </div>
+            `;
+            
+            return div;
+        }
+
+        // Function to send a message
+        async function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const content = messageInput.value.trim();
+            
+            if (!content || !currentChatUser) return;
+            
+            const sendButton = document.getElementById('sendMessage');
+            sendButton.disabled = true;
+            
+            try {
+                const response = await fetch('/api/messages/send', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        receiver_id: currentChatUser.id,
+                        listing_id: currentChatUser.listing_id,
+                        content: content
+                    }),
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Failed to send message');
+                }
+
+                // Clear input
+                messageInput.value = '';
+                messageInput.focus();
+                
+                // Refresh messages
+                await loadChatMessages(currentChatUser.id, currentChatUser.listing_id);
+                
+                // Scroll to bottom
+                scrollToBottom();
+                
+            } catch (error) {
+                console.error('Error sending message:', error);
+                showAlert('Error', error.message, 'error');
+            } finally {
+                sendButton.disabled = false;
+            }
+        }
+
+        // Function to scroll to bottom
+        function scrollToBottom() {
+            const chatMessages = document.getElementById('chatMessages');
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Function to add scroll button
+        function addScrollButton() {
+            let scrollButton = document.getElementById('scrollBottom');
+            if (!scrollButton) {
+                scrollButton = document.createElement('button');
+                scrollButton.id = 'scrollBottom';
+                scrollButton.className = 'btn btn-primary btn-sm rounded-circle position-absolute';
+                scrollButton.innerHTML = '<i class="fas fa-arrow-down"></i>';
+                scrollButton.onclick = scrollToBottom;
+                document.querySelector('.chat-window').appendChild(scrollButton);
+            }
+            
+            // Show/hide scroll button based on scroll position
+            const chatMessages = document.getElementById('chatMessages');
+            chatMessages.addEventListener('scroll', () => {
+                const isScrolledToBottom = 
+                    Math.abs(chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight) < 10;
+                scrollButton.style.display = isScrolledToBottom ? 'none' : 'block';
+            });
+        }
+
+        // Utility function to format message time
+        function formatMessageTime(timestamp) {
+            const date = new Date(timestamp);
+            const now = new Date();
+            
+            if (date.toDateString() === now.toDateString()) {
+                return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            } else {
+                return date.toLocaleDateString();
+            }
+        }
+
+        // Function to show alert messages
+        function showAlert(title, message, type = 'info') {
+            // You can implement your own alert system here
+            console.log(`${title}: ${message}`);
+        }
+
+        // Message input handler
+        document.getElementById('messageInput').addEventListener('input', function() {
+            const sendButton = document.getElementById('sendMessage');
+            sendButton.disabled = !this.value.trim();
+        });
+
+        // Initialize chat when modal is shown
+        document.getElementById('chatModal').addEventListener('show.bs.modal', () => {
+            // Reset chat window to empty state
+            document.querySelector('.chat-empty-state').style.display = 'flex';
+            document.getElementById('chatContent').classList.add('d-none');
+            
+            // Disable message input initially
+            document.getElementById('messageInput').disabled = true;
+            
+            // Initialize chat
+            initializeChat();
+        });
+
+        // Search functionality
+        document.getElementById('chatSearch').addEventListener('input', function(e) {
+            const searchTerm = e.target.value.toLowerCase();
+            const chatItems = document.querySelectorAll('.chat-item');
+            
+            chatItems.forEach(item => {
+                const userName = item.querySelector('h6').textContent.toLowerCase();
+                const lastMessage = item.querySelector('p').textContent.toLowerCase();
+                
+                if (userName.includes(searchTerm) || lastMessage.includes(searchTerm)) {
+                    item.style.display = '';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        });
+
+        // Function to show messages modal
+        function showMessages() {
+            const chatModal = new bootstrap.Modal(document.getElementById('chatModal'));
+            chatModal.show();
+        }
+        // Add this to your DOMContentLoaded event listener
+        const urlParams = new URLSearchParams(window.location.search);
+        const verificationStatus = urlParams.get('verification');
+
+        if (verificationStatus === 'success') {
+            showAlert('Email Verified', 'You can now login!', 'success');
+            // Clear the query parameter
+            window.history.replaceState({}, document.title, window.location.pathname);
+        } else if (verificationStatus === 'invalid') {
+            showAlert('Invalid Token', 'The verification link is invalid', 'error');
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+        
+        // Messaging System
+
+        // Enhanced JavaScript functionality
+
+        // Add this at the start of your JavaScript
+
+        // Email verification handling
+        window.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const token = urlParams.get('token');
+            const action = urlParams.get('action');
+
+            // Handle verification callback
+            if (token && action === 'verify') {
+                // Call the verification API
+                fetch(`/verify-email/${token}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.message) {
+                            Swal.fire({
+                                title: 'Email Verified!',
+                                text: 'Your email has been verified successfully. You can now log in.',
+                                icon: 'success',
+                                confirmButtonText: 'Login Now'
+                            }).then((result) => {
+                                if (result.isConfirmed) {
+                                    // Open login modal
+                                    const loginModal = new bootstrap.Modal(document.getElementById('loginModal'));
+                                    loginModal.show();
+                                }
+                            });
+                        } else {
+                            Swal.fire({
+                                title: 'Verification Failed',
+                                text: data.error || 'There was a problem verifying your email.',
+                                icon: 'error'
+                            });
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Verification error:', error);
+                        Swal.fire({
+                            title: 'Verification Error',
+                            text: 'An unexpected error occurred during verification.',
+                            icon: 'error'
+                        });
+                    });
+                
+                // Clear the query parameters
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+        });
+
+        // Add this function to check for new messages periodically
+        function startMessageChecking() {
+            let lastMessageTime = new Date().toISOString();
+            
+            setInterval(async () => {
+                if (!currentUser) return;
+                
+                try {
+                    const response = await fetch(`/api/messages/check-new?since=${lastMessageTime}`, {
+                        credentials: 'same-origin'
+                    });
+                    
+                    if (!response.ok) throw new Error('Failed to check messages');
+                    
+                    const data = await response.json();
+                    
+                    if (data.messages && data.messages.length > 0) {
+                        // Update last message time
+                        lastMessageTime = new Date().toISOString();
+                        
+                        // Show notification for each new message
+                        data.messages.forEach(message => {
+                            Swal.fire({
+                                title: 'New Message',
+                                html: `
+                                    <p><strong>From:</strong> ${message.sender.full_name}</p>
+                                    <p><strong>About:</strong> ${message.listing.title}</p>
+                                    <p>${message.content}</p>
+                                `,
+                                icon: 'info',
+                                showCancelButton: true,
+                                confirmButtonText: 'Reply',
+                                cancelButtonText: 'Later'
+                            }).then((result) => {
+                                if (result.isConfirmed) {
+                                    showMessages();
+                                    // Open the specific chat
+                                    setTimeout(() => {
+                                        openChat(message.sender, message.listing_id);
+                                    }, 500);
+                                }
+                            });
+                        });
+                    }
+                } catch (error) {
+                    console.error('Error checking messages:', error);
+                }
+            }, 10000); // Check every 10 seconds
+        }
+
+        // Add this to your login success handler
+        if (response.ok) {
+            // ... existing login success code ...
+            startMessageChecking(); // Start checking for new messages
+        }
+
+        // Add these new functions for editing and deleting listings
+        
+
+        async function deleteListing(listingId) {
+            try {
+                const result = await Swal.fire({
+                    title: 'Are you sure?',
+                    text: "You won't be able to revert this!",
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonColor: '#d33',
+                    cancelButtonColor: '#3085d6',
+                    confirmButtonText: 'Yes, delete it!'
+                });
+
+                if (result.isConfirmed) {
+                    const response = await fetch(`/api/listings/${listingId}`, {
+                        method: 'DELETE',
+                        credentials: 'same-origin'
+                    });
+
+                    if (!response.ok) throw new Error('Failed to delete listing');
+
+                    showAlert('Success', 'Listing deleted successfully', 'success');
+                    
+                    // Reload the page after deletion
+                    if (window.location.pathname === '/my-listings') {
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1500);
+                    }
+                }
+            } catch (error) {
+                showAlert('Error', error.message, 'error');
+            }
+        }
+
+        // Update the wishlist link/button click handler
+        
+
+        // Add this new function to initialize the wishlist page
+        
+        // At the bottom of your script, add:
+        window.addEventListener('load', function() {
+            // If admin modal exists and user is admin, show it
+            const adminModalEl = document.getElementById('adminDashboardModal');
+            if (adminModalEl && localStorage.getItem('isAdmin') === 'true' && currentUser && currentUser.is_admin) {
+                const adminModal = new bootstrap.Modal(adminModalEl);
+                adminModal.show();
+                loadAdminData();
+            } else if (localStorage.getItem('isAdmin') === 'true' && (!currentUser || !currentUser.is_admin)) {
+                // If localStorage has admin flag but user isn't admin, clear it
+                localStorage.removeItem('isAdmin');
+                localStorage.removeItem('adminDashboardOpen');
+            }
+        });
+        // Admin Dashboard Main Functions
+        function showAdminDashboard() {
+            // Stricter admin check - require both localStorage AND current user to be admin
+            // This prevents non-admin users from accessing admin features
+            if (!currentUser || !currentUser.is_admin) {
+                // Clear any admin status in localStorage to be safe
+                localStorage.removeItem('isAdmin');
+                localStorage.removeItem('adminDashboardOpen');
+                showAlert('Access Denied', 'You must be an admin to access this page', 'error');
+                return;
+            }
+            
+            // Store that admin dashboard is open
+            localStorage.setItem('adminDashboardOpen', 'true');
+
+            const adminModal = new bootstrap.Modal(document.getElementById('adminDashboardModal'));
+            adminModal.show();
+            loadAdminData();
+            
+            // Store admin status in localStorage
+            localStorage.setItem('isAdmin', 'true');
+        }
+        // Alert Utility Function
+        function showAlert(title, message, type = 'info') {
+            const alertPlaceholder = document.getElementById('alertsContainer');
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = `
+                <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                    <strong>${title}:</strong> ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            `;
+            alertPlaceholder.append(wrapper);
+            
+            // Auto-dismiss after 5 seconds
+            setTimeout(() => {
+                const alert = bootstrap.Alert.getInstance(wrapper.querySelector('.alert'));
+                if (alert) {
+                    alert.close();
+                } else {
+                    wrapper.querySelector('.alert').remove();
+                }
+            }, 5000);
+        }
+
+        // User Management
+        let currentUserPage = 1;
+        const usersPerPage = 10;
+
+        async function adminDeleteUser(userId) {
+            try {
+                const result = await Swal.fire({
+                    title: 'Are you sure?',
+                    text: "This will delete the user and all their listings!",
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonColor: '#d33',
+                    cancelButtonColor: '#3085d6',
+                    confirmButtonText: 'Yes, delete it!'
+                });
+
+                if (result.isConfirmed) {
+                    Swal.fire({
+                        title: 'Deleting...',
+                        text: 'Please wait while we delete the user and their listings',
+                        allowOutsideClick: false,
+                        didOpen: () => {
+                            Swal.showLoading();
+                        }
+                    });
+                    
+                    const response = await fetch(`/admin/delete-user/${userId}`, {
+                        method: 'DELETE',
+                        credentials: 'same-origin'
+                    });
+                    
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || 'Failed to delete user');
+                    }
+                    
+                    const data = await response.json();
+                    
+                    Swal.fire({
+                        title: 'Success!',
+                        text: data.message || 'User and their listings deleted successfully',
+                        icon: 'success',
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                    
+                    // Reload admin data to refresh the UI
+                    setTimeout(() => {
+                        loadAdminData();
+                    }, 500);
+                }
+            } catch (error) {
+                console.error('Error deleting user:', error);
+                Swal.fire({
+                    title: 'Error',
+                    text: error.message || 'Failed to delete user',
+                    icon: 'error'
+                });
+            }
+        }
+
+        async function adminToggleVerification(userId, isVerified) {
+            try {
+                const response = await fetch(`/admin/toggle-verification/${userId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) throw new Error('Failed to update verification status');
+                
+                const data = await response.json();
+                showAlert('Success', data.message, 'success');
+                
+            } catch (error) {
+                showAlert('Error', error.message, 'error');
+                // Revert the toggle if there was an error
+                document.querySelector(`.toggle-verification[data-user-id="${userId}"]`).checked = !isVerified;
+            }
+        }
+
+        async function showUserDetails(userId) {
+            try {
+                const response = await fetch(`/admin/user-details/${userId}`, {
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) throw new Error('Failed to load user details');
+                
+                const user = await response.json();
+                
+                // Format the user details HTML
+                const userDetailsHtml = `
+                    <div class="row">
+                        <div class="col-md-4 text-center mb-3">
+                            ${user.profile_picture ? 
+                                `<img src="/static/${user.profile_picture}" class="img-fluid rounded-circle" alt="Profile" style="max-height: 200px;">` : 
+                                `<i class="fas fa-user-circle fa-5x text-muted"></i>`}
+                        </div>
+                        <div class="col-md-8">
+                            <h4>${user.full_name || 'N/A'}</h4>
+                            <p><strong>Email:</strong> ${user.email}</p>
+                            <p><strong>College:</strong> ${user.college || 'N/A'}</p>
+                            <p><strong>Department:</strong> ${user.department || 'N/A'}</p>
+                            <p><strong>Year:</strong> ${user.year || 'N/A'}</p>
+                            <p><strong>Registered:</strong> ${new Date(user.created_at).toLocaleString()}</p>
+                            <p><strong>Status:</strong> 
+                                <span class="badge ${user.is_verified ? 'bg-success' : 'bg-warning'}">
+                                    ${user.is_verified ? 'Verified' : 'Unverified'}
+                                </span>
+                            </p>
+                            <p><strong>Listings Count:</strong> ${user.listings_count || 0}</p>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4">
+                        <h5>User's Listings</h5>
+                        <div class="row" id="userListingsContainer">
+                            <!-- Listings will be loaded here -->
+                        </div>
+                    </div>
+                `;
+                
+                // Set the content and show the modal
+                document.getElementById('userDetailsContent').innerHTML = userDetailsHtml;
+                const userDetailsModal = new bootstrap.Modal(document.getElementById('userDetailsModal'));
+                userDetailsModal.show();
+                
+                // Load user's listings
+                loadUserListings(userId);
+                
+            } catch (error) {
+                showAlert('Error', error.message, 'error');
+            }
+        }
+
+        async function loadUserListings(userId) {
+            try {
+                const response = await fetch(`/admin/user-listings/${userId}`, {
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) throw new Error('Failed to load user listings');
+                
+                const listings = await response.json();
+                const container = document.getElementById('userListingsContainer');
+                
+                if (listings.length === 0) {
+                    container.innerHTML = '<div class="col-12 text-muted">No listings found</div>';
+                    return;
+                }
+                
+                container.innerHTML = listings.map(listing => `
+                    <div class="col-md-4 mb-3">
+                        <div class="card h-100">
+                            <img src="/static/${listing.image_url}" class="card-img-top" alt="${listing.title}" style="height: 150px; object-fit: cover;">
+                            <div class="card-body">
+                                <h6 class="card-title">${listing.title}</h6>
+                                <p class="card-text">₹${listing.price}</p>
+                                <button class="btn btn-sm btn-primary" onclick="showListingDetails(${listing.id})">
+                                    View Details
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+                
+            } catch (error) {
+                console.error('Error loading user listings:', error);
+            }
+        }
+
+        async function loadAdminUsers(page = 1, search = '', filter = '') {
+            try {
+                const response = await fetch(`/admin/dashboard?page=${page}&search=${search}&filter=${filter}`, {
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) throw new Error('Failed to load users');
+                
+                const data = await response.json();
+                const usersTable = document.getElementById('usersTableBody');
+                usersTable.innerHTML = data.users.map(user => `
+                    <tr>
+                        <td>
+                            <input type="checkbox" class="form-check-input user-checkbox" value="${user.id}">
+                        </td>
+                        <td>${user.id}</td>
+                        <td>
+                            <a href="#" onclick="showUserDetails(${user.id})">${user.full_name || 'N/A'}</a>
+                        </td>
+                        <td>${user.email}</td>
+                        <td>${user.college || 'N/A'}</td>
+                        <td>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input toggle-verification" type="checkbox" 
+                                    data-user-id="${user.id}" ${user.is_verified ? 'checked' : ''}>
+                            </div>
+                        </td>
+                        <td>${user.listings_count}</td>
+                        <td>
+                            <button class="btn btn-sm btn-danger" onclick="adminDeleteUser(${user.id})">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+                
+                // Update pagination info
+                const totalUsers = data.stats.total_users;
+                const start = (page - 1) * usersPerPage + 1;
+                const end = Math.min(page * usersPerPage, totalUsers);
+                
+                document.getElementById('userStart').textContent = start;
+                document.getElementById('userEnd').textContent = end;
+                document.getElementById('userTotal').textContent = totalUsers;
+                
+                // Update pagination buttons
+                document.getElementById('userPrevPage').disabled = page <= 1;
+                document.getElementById('userNextPage').disabled = end >= totalUsers;
+                
+                currentUserPage = page;
+                
+                // Add event listeners for verification toggles
+                document.querySelectorAll('.toggle-verification').forEach(toggle => {
+                    toggle.addEventListener('change', function() {
+                        adminToggleVerification(this.dataset.userId, this.checked);
+                    });
+                });
+                
+            } catch (error) {
+                showAlert('Error', error.message, 'error');
+            }
+        }
+
+        // Listing Management
+        let currentListingPage = 1;
+        const listingsPerPage = 10;
+
+        async function adminDeleteListing(listingId) {
+            try {
+                const result = await Swal.fire({
+                    title: 'Are you sure?',
+                    text: "This will permanently delete the listing!",
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonColor: '#d33',
+                    cancelButtonColor: '#3085d6',
+                    confirmButtonText: 'Yes, delete it!'
+                });
+
+                if (result.isConfirmed) {
+                    Swal.fire({
+                        title: 'Deleting...',
+                        text: 'Please wait while we delete the listing',
+                        allowOutsideClick: false,
+                        didOpen: () => {
+                            Swal.showLoading();
+                        }
+                    });
+                    
+                    const response = await fetch(`/admin/delete-listing/${listingId}`, {
+                        method: 'DELETE',
+                        credentials: 'same-origin'
+                    });
+                    
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || 'Failed to delete listing');
+                    }
+                    
+                    const data = await response.json();
+                    
+                    Swal.fire({
+                        title: 'Success!',
+                        text: data.message || 'Listing deleted successfully',
+                        icon: 'success',
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                    
+                    // Reload admin data to refresh the UI
+                    setTimeout(() => {
+                        loadAdminData();
+                    }, 500);
+                }
+            } catch (error) {
+                console.error('Error deleting listing:', error);
+                Swal.fire({
+                    title: 'Error',
+                    text: error.message || 'Failed to delete listing',
+                    icon: 'error'
+                });
+            }
+        }
+
+        async function adminToggleFakeWarning(listingId, isFakeWarning) {
+            try {
+                const response = await fetch(`/admin/toggle-fake-warning/${listingId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) throw new Error('Failed to update fake warning status');
+                
+                const data = await response.json();
+                showAlert('Success', data.message, 'success');
+                
+            } catch (error) {
+                showAlert('Error', error.message, 'error');
+                // Revert the toggle if there was an error
+                document.querySelector(`.toggle-fake-warning[data-listing-id="${listingId}"]`).checked = !isFakeWarning;
+            }
+        }
+
+        async function showListingDetails(listingId) {
+            try {
+                const response = await fetch(`/admin/listing-details/${listingId}`, {
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) throw new Error('Failed to load listing details');
+                
+                const listing = await response.json();
+                
+                // Format the listing details HTML
+                const listingDetailsHtml = `
+                    <div class="row">
+                        <div class="col-md-5">
+                            <img src="/static/${listing.image_url}" class="img-fluid rounded" alt="${listing.title}">
+                        </div>
+                        <div class="col-md-7">
+                            <h3>${listing.title}</h3>
+                            <p class="text-muted">Posted by: ${listing.seller.full_name} (ID: ${listing.seller_id})</p>
+                            <p><strong>Price:</strong> ₹${listing.price}</p>
+                            ${listing.rent_price ? `<p><strong>Rent Price:</strong> ₹${listing.rent_price}</p>` : ''}
+                            <p><strong>Category:</strong> ${listing.category}</p>
+                            <p><strong>Condition:</strong> ${listing.condition}</p>
+                            <p><strong>Posted:</strong> ${new Date(listing.created_at).toLocaleString()}</p>
+                            <p><strong>Status:</strong> 
+                                <span class="badge ${listing.is_fake_warning ? 'bg-danger' : 'bg-success'}">
+                                    ${listing.is_fake_warning ? 'Marked as suspicious' : 'Verified'}
+                                </span>
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4">
+                        <h5>Description</h5>
+                        <p>${listing.description}</p>
+                        
+                        ${listing.product_type ? `<p><strong>Product Type:</strong> ${listing.product_type}</p>` : ''}
+                        ${listing.branch ? `<p><strong>Branch:</strong> ${listing.branch}</p>` : ''}
+                        ${listing.study_year ? `<p><strong>Study Year:</strong> ${listing.study_year}</p>` : ''}
+                        ${listing.working_condition ? `<p><strong>Working Condition:</strong> ${listing.working_condition}</p>` : ''}
+                        ${listing.warranty_status ? `<p><strong>Warranty Status:</strong> ${listing.warranty_status}</p>` : ''}
+                        ${listing.subject ? `<p><strong>Subject:</strong> ${listing.subject}</p>` : ''}
+                    </div>
+                `;
+                
+                // Set the content and show the modal
+                document.getElementById('listingDetailsContent').innerHTML = listingDetailsHtml;
+                const listingDetailsModal = new bootstrap.Modal(document.getElementById('listingDetailsModal'));
+                listingDetailsModal.show();
+                
+            } catch (error) {
+                showAlert('Error', error.message, 'error');
+            }
+        }
+
+        async function loadAdminListings(page = 1, search = '', filter = '') {
+            try {
+                const response = await fetch(`/admin/dashboard?page=${page}&search=${search}&filter=${filter}`, {
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) throw new Error('Failed to load listings');
+                
+                const data = await response.json();
+                const listingsTable = document.getElementById('listingsTableBody');
+                
+                if (!data.listings || data.listings.length === 0) {
+                    listingsTable.innerHTML = `
+                        <tr>
+                            <td colspan="8" class="text-center py-3">No listings found</td>
+                        </tr>
+                    `;
+                    return;
+                }
+                
+                listingsTable.innerHTML = data.listings.map(listing => `
+                    <tr>
+                        <td>
+                            <input type="checkbox" class="form-check-input listing-checkbox" value="${listing.id}">
+                        </td>
+                        <td>${listing.id}</td>
+                        <td>
+                            <a href="#" onclick="showListingDetails(${listing.id})">${listing.title}</a>
+                        </td>
+                        <td>₹${listing.price}</td>
+                        <td>${listing.category}</td>
+                        <td>${listing.seller_name}</td>
+                        <td>
+                            <span class="badge ${listing.is_fake_warning ? 'bg-danger' : 'bg-success'}">
+                                ${listing.is_fake_warning ? 'Flagged' : 'Clean'}
+                            </span>
+                        </td>
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <button class="btn btn-outline-primary" onclick="showListingDetails(${listing.id})" 
+                                    title="View Details">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                                <button class="btn btn-outline-warning" onclick="adminToggleFakeWarning(${listing.id}, ${!listing.is_fake_warning})" 
+                                    title="${listing.is_fake_warning ? 'Remove Flag' : 'Flag as Fake'}">
+                                    <i class="fas fa-flag"></i>
+                                </button>
+                                <button class="btn btn-outline-danger" onclick="adminDeleteListing(${listing.id})" 
+                                    title="Delete Listing">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `).join('');
+                
+                // Update pagination info
+                const totalListings = data.stats.total_listings;
+                const start = (page - 1) * listingsPerPage + 1;
+                const end = Math.min(page * listingsPerPage, totalListings);
+                
+                document.getElementById('listingStart').textContent = start;
+                document.getElementById('listingEnd').textContent = end;
+                document.getElementById('listingTotal').textContent = totalListings;
+                
+                // Update pagination buttons
+                document.getElementById('listingPrevPage').disabled = page <= 1;
+                document.getElementById('listingNextPage').disabled = end >= totalListings;
+                
+                currentListingPage = page;
+                
+            } catch (error) {
+                console.error('Error loading listings:', error);
+                Swal.fire({
+                    title: 'Error',
+                    text: error.message || 'Failed to load listings',
+                    icon: 'error'
+                });
+            }
+        }
+        
+        // Toggle fake warning flag on a listing
+        async function adminToggleFakeWarning(listingId, setFlagged) {
+            try {
+                Swal.fire({
+                    title: 'Updating...',
+                    text: `${setFlagged ? 'Flagging' : 'Unflagging'} listing`,
+                    allowOutsideClick: false,
+                    didOpen: () => {
+                        Swal.showLoading();
+                    }
+                });
+                
+                const response = await fetch(`/admin/toggle-fake-warning/${listingId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Failed to update fake warning status');
+                }
+                
+                const data = await response.json();
+                
+                Swal.fire({
+                    title: 'Success!',
+                    text: data.message || 'Listing status updated successfully',
+                    icon: 'success',
+                    timer: 2000,
+                    showConfirmButton: false
+                });
+                
+                // Refresh listings
+                loadAdminListings(currentListingPage);
+                
+            } catch (error) {
+                Swal.fire({
+                    title: 'Error',
+                    text: error.message,
+                    icon: 'error'
+                });
+            }
+        }
+
+        // Charts and Statistics
+        function initCharts() {
+            // Load Chart.js from CDN if not already loaded
+            if (typeof Chart === 'undefined') {
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+                script.onload = renderCharts;
+                document.head.appendChild(script);
+            } else {
+                renderCharts();
+            }
+        }
+
+        function renderCharts() {
+            fetch('/admin/stats', {
+                credentials: 'same-origin'
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to load chart data');
+                }
+                return response.json();
+            })
+            .then(data => {
+                try {
+                    // User Growth Chart
+                    const userGrowthCtx = document.getElementById('userGrowthChart');
+                    if (userGrowthCtx && data.user_growth && data.user_growth.length > 0) {
+                        new Chart(userGrowthCtx.getContext('2d'), {
+                            type: 'line',
+                            data: {
+                                labels: data.user_growth.map(item => item.date),
+                                datasets: [{
+                                    label: 'New Users',
+                                    data: data.user_growth.map(item => item.count),
+                                    backgroundColor: 'rgba(37, 99, 235, 0.2)',
+                                    borderColor: 'rgba(37, 99, 235, 1)',
+                                    borderWidth: 2,
+                                    tension: 0.3,
+                                    fill: true
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                plugins: {
+                                    legend: {
+                                        display: false
+                                    }
+                                },
+                                scales: {
+                                    y: {
+                                        beginAtZero: true,
+                                        ticks: {
+                                            precision: 0
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+
+                    // Listing Growth Chart
+                    const listingGrowthCtx = document.getElementById('listingGrowthChart');
+                    if (listingGrowthCtx && data.listing_growth && data.listing_growth.length > 0) {
+                        new Chart(listingGrowthCtx.getContext('2d'), {
+                            type: 'line',
+                            data: {
+                                labels: data.listing_growth.map(item => item.date),
+                                datasets: [{
+                                    label: 'New Listings',
+                                    data: data.listing_growth.map(item => item.count),
+                                    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                                    borderColor: 'rgba(16, 185, 129, 1)',
+                                    borderWidth: 2,
+                                    tension: 0.3,
+                                    fill: true
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                plugins: {
+                                    legend: {
+                                        display: false
+                                    }
+                                },
+                                scales: {
+                                    y: {
+                                        beginAtZero: true,
+                                        ticks: {
+                                            precision: 0
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+
+                    // Category Distribution Chart
+                    const categoryCtx = document.getElementById('categoryChart');
+                    if (categoryCtx && data.category_distribution && data.category_distribution.length > 0) {
+                        const categories = data.category_distribution.map(item => item.category);
+                        const counts = data.category_distribution.map(item => item.count);
+                        
+                        new Chart(categoryCtx.getContext('2d'), {
+                            type: 'doughnut',
+                            data: {
+                                labels: categories,
+                                datasets: [{
+                                    data: counts,
+                                    backgroundColor: [
+                                        'rgba(37, 99, 235, 0.7)',
+                                        'rgba(16, 185, 129, 0.7)',
+                                        'rgba(245, 158, 11, 0.7)',
+                                        'rgba(239, 68, 68, 0.7)',
+                                        'rgba(139, 92, 246, 0.7)',
+                                        'rgba(236, 72, 153, 0.7)'
+                                    ],
+                                    borderWidth: 1
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                plugins: {
+                                    legend: {
+                                        position: 'right'
+                                    }
+                                }
+                            }
+                        });
+                    }
+                    
+                    // College Distribution Chart is skipped as the data is not available yet
+                } catch (error) {
+                    console.error('Error rendering charts:', error);
+                }
+            })
+            .catch(error => {
+                console.error('Error loading stats:', error);
+            });
+        }
+
+        // Main Data Loader
+        async function loadAdminData() {
+            try {
+                // Load stats first
+                const statsResponse = await fetch('/admin/dashboard', {
+                    credentials: 'same-origin'
+                });
+                
+                if (!statsResponse.ok) {
+                    const errorData = await statsResponse.json();
+                    throw new Error(errorData.error || 'Failed to load admin data');
+                }
+                
+                const data = await statsResponse.json();
+                
+                // Update stats
+                if (data && data.stats) {
+                    document.getElementById('totalUsers').textContent = data.stats.total_users || 0;
+                    document.getElementById('verifiedUsers').textContent = data.stats.verified_users || 0;
+                    document.getElementById('unverifiedUsers').textContent = 
+                        (data.stats.total_users || 0) - (data.stats.verified_users || 0);
+                    document.getElementById('totalListings').textContent = data.stats.total_listings || 0;
+                    document.getElementById('fakeWarnings').textContent = data.stats.fake_warnings || 0;
+                    
+                    // Update reports badge
+                    if (data.stats.pending_reports) {
+                        document.getElementById('reportsBadge').textContent = data.stats.pending_reports;
+                        document.getElementById('reportsBadge').style.display = 'inline-block';
+                    } else {
+                        document.getElementById('reportsBadge').style.display = 'none';
+                    }
+                }
+                
+                // Initialize charts
+                try {
+                    initCharts();
+                } catch (chartError) {
+                    console.error('Error initializing charts:', chartError);
+                }
+                
+                // Load users if available
+                if (data && data.users) {
+                    // Populate users table
+                    const usersTable = document.getElementById('usersTableBody');
+                    usersTable.innerHTML = data.users.map(user => `
+                        <tr>
+                            <td>
+                                <input type="checkbox" class="form-check-input user-checkbox" value="${user.id}">
+                            </td>
+                            <td>${user.id}</td>
+                            <td>
+                                <a href="#" onclick="showUserDetails(${user.id})">${user.full_name || 'N/A'}</a>
+                            </td>
+                            <td>${user.email}</td>
+                            <td>${user.college || 'N/A'}</td>
+                            <td>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input toggle-verification" type="checkbox" 
+                                        data-user-id="${user.id}" ${user.is_verified ? 'checked' : ''}>
+                                </div>
+                            </td>
+                            <td>${user.listings_count || 0}</td>
+                            <td>
+                                <button class="btn btn-sm btn-danger" onclick="adminDeleteUser(${user.id})">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('');
+                    
+                    // Add event listeners for verification toggles
+                    document.querySelectorAll('.toggle-verification').forEach(toggle => {
+                        toggle.addEventListener('change', function() {
+                            adminToggleVerification(this.dataset.userId, this.checked);
+                        });
+                    });
+                } else {
+                    // If data doesn't include users, load them separately
+                    loadAdminUsers();
+                }
+                
+                // Load listings if available
+                if (data && data.listings) {
+                    // Populate listings table
+                    const listingsTable = document.getElementById('listingsTableBody');
+                    listingsTable.innerHTML = data.listings.map(listing => `
+                        <tr>
+                            <td>
+                                <input type="checkbox" class="form-check-input listing-checkbox" value="${listing.id}">
+                            </td>
+                            <td>${listing.id}</td>
+                            <td>
+                                <a href="#" onclick="showListingDetails(${listing.id})">${listing.title}</a>
+                            </td>
+                            <td>₹${listing.price}</td>
+                            <td>${listing.category}</td>
+                            <td>${listing.seller_name}</td>
+                            <td>
+                                <span class="badge ${listing.is_fake_warning ? 'bg-danger' : 'bg-success'}">
+                                    ${listing.is_fake_warning ? 'Flagged' : 'Clean'}
+                                </span>
+                            </td>
+                            <td>
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-primary" onclick="showListingDetails(${listing.id})" 
+                                        title="View Details">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                    <button class="btn btn-outline-warning" onclick="adminToggleFakeWarning(${listing.id}, ${!listing.is_fake_warning})" 
+                                        title="${listing.is_fake_warning ? 'Remove Flag' : 'Flag as Fake'}">
+                                        <i class="fas fa-flag"></i>
+                                    </button>
+                                    <button class="btn btn-outline-danger" onclick="adminDeleteListing(${listing.id})" 
+                                        title="Delete Listing">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    `).join('');
+                } else {
+                    // If data doesn't include listings, load them separately
+                    loadAdminListings();
+                }
+                
+                // Load reports if available
+                if (data && data.reports) {
+                    populateReportsTable(data.reports);
+                }
+                
+            } catch (error) {
+                console.error('Error loading admin data:', error);
+                Swal.fire({
+                    title: 'Error',
+                    text: error.message || 'Failed to load admin dashboard data',
+                    icon: 'error'
+                });
+            }
+        }
+
+        // Search and Filter Functions
+        function searchUsers() {
+            const searchTerm = document.getElementById('userSearchInput').value;
+            const filterValue = document.getElementById('userFilterSelect').value;
+            loadAdminUsers(1, searchTerm, filterValue);
+        }
+
+        function searchListings() {
+            const searchTerm = document.getElementById('listingSearchInput').value;
+            const filterValue = document.getElementById('listingFilterSelect').value;
+            loadAdminListings(1, searchTerm, filterValue);
+        }
+
+        // Pagination Handlers
+        function userPrevPage() {
+            if (currentUserPage > 1) {
+                const searchTerm = document.getElementById('userSearchInput').value;
+                const filterValue = document.getElementById('userFilterSelect').value;
+                loadAdminUsers(currentUserPage - 1, searchTerm, filterValue);
+            }
+        }
+
+        function userNextPage() {
+            const searchTerm = document.getElementById('userSearchInput').value;
+            const filterValue = document.getElementById('userFilterSelect').value;
+            loadAdminUsers(currentUserPage + 1, searchTerm, filterValue);
+        }
+
+        function listingPrevPage() {
+            if (currentListingPage > 1) {
+                const searchTerm = document.getElementById('listingSearchInput').value;
+                const filterValue = document.getElementById('listingFilterSelect').value;
+                loadAdminListings(currentListingPage - 1, searchTerm, filterValue);
+            }
+        }
+
+        function listingNextPage() {
+            const searchTerm = document.getElementById('listingSearchInput').value;
+            const filterValue = document.getElementById('listingFilterSelect').value;
+            loadAdminListings(currentListingPage + 1, searchTerm, filterValue);
+        }
+
+        // Bulk Actions
+        function bulkDeleteUsers() {
+            const selectedUsers = Array.from(document.querySelectorAll('.user-checkbox:checked')).map(cb => cb.value);
+            
+            if (selectedUsers.length === 0) {
+                showAlert('Warning', 'No users selected', 'warning');
+                return;
+            }
+            
+            Swal.fire({
+                title: 'Are you sure?',
+                text: `You are about to delete ${selectedUsers.length} users and their listings! This cannot be undone.`,
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                cancelButtonColor: '#3085d6',
+                confirmButtonText: 'Yes, delete them!'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    Swal.fire({
+                        title: 'Deleting...',
+                        text: 'Please wait while we delete the users',
+                        allowOutsideClick: false,
+                        didOpen: () => {
+                            Swal.showLoading();
+                        }
+                    });
+                    
+                    let completedRequests = 0;
+                    let failedRequests = 0;
+                    
+                    selectedUsers.forEach(userId => {
+                        fetch(`/admin/delete-user/${userId}`, {
+                            method: 'DELETE',
+                            credentials: 'same-origin'
+                        })
+                        .then(response => {
+                            if (response.ok) {
+                                completedRequests++;
+                            } else {
+                                failedRequests++;
+                            }
+                            
+                            // Check if all requests are done
+                            if (completedRequests + failedRequests === selectedUsers.length) {
+                                if (failedRequests === 0) {
+                                    Swal.fire({
+                                        title: 'Success!',
+                                        text: `${completedRequests} users deleted successfully`,
+                                        icon: 'success',
+                                        timer: 2000,
+                                        showConfirmButton: false
+                                    });
+                                } else {
+                                    Swal.fire({
+                                        title: 'Partial Success',
+                                        text: `${completedRequests} users deleted successfully, ${failedRequests} failed`,
+                                        icon: 'warning'
+                                    });
+                                }
+                                
+                                // Reload the admin data
+                                loadAdminData();
+                            }
+                        })
+                        .catch(error => {
+                            failedRequests++;
+                            
+                            // Check if all requests are done
+                            if (completedRequests + failedRequests === selectedUsers.length) {
+                                Swal.fire({
+                                    title: 'Error',
+                                    text: 'Some or all user deletions failed',
+                                    icon: 'error'
+                                });
+                                
+                                // Reload the admin data
+                                loadAdminData();
+                            }
+                        });
+                    });
+                }
+            });
+        }
+
+        function bulkDeleteListings() {
+            const selectedListings = Array.from(document.querySelectorAll('.listing-checkbox:checked')).map(cb => cb.value);
+            
+            if (selectedListings.length === 0) {
+                showAlert('Warning', 'No listings selected', 'warning');
+                return;
+            }
+            
+            Swal.fire({
+                title: 'Are you sure?',
+                text: `You are about to delete ${selectedListings.length} listings! This cannot be undone.`,
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                cancelButtonColor: '#3085d6',
+                confirmButtonText: 'Yes, delete them!'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    Swal.fire({
+                        title: 'Deleting...',
+                        text: 'Please wait while we delete the listings',
+                        allowOutsideClick: false,
+                        didOpen: () => {
+                            Swal.showLoading();
+                        }
+                    });
+                    
+                    let completedRequests = 0;
+                    let failedRequests = 0;
+                    
+                    selectedListings.forEach(listingId => {
+                        fetch(`/admin/delete-listing/${listingId}`, {
+                            method: 'DELETE',
+                            credentials: 'same-origin'
+                        })
+                        .then(response => {
+                            if (response.ok) {
+                                completedRequests++;
+                            } else {
+                                failedRequests++;
+                            }
+                            
+                            // Check if all requests are done
+                            if (completedRequests + failedRequests === selectedListings.length) {
+                                if (failedRequests === 0) {
+                                    Swal.fire({
+                                        title: 'Success!',
+                                        text: `${completedRequests} listings deleted successfully`,
+                                        icon: 'success',
+                                        timer: 2000,
+                                        showConfirmButton: false
+                                    });
+                                } else {
+                                    Swal.fire({
+                                        title: 'Partial Success',
+                                        text: `${completedRequests} listings deleted successfully, ${failedRequests} failed`,
+                                        icon: 'warning'
+                                    });
+                                }
+                                
+                                // Reload the admin data
+                                loadAdminData();
+                            }
+                        })
+                        .catch(error => {
+                            failedRequests++;
+                            
+                            // Check if all requests are done
+                            if (completedRequests + failedRequests === selectedListings.length) {
+                                Swal.fire({
+                                    title: 'Error',
+                                    text: 'Some or all listing deletions failed',
+                                    icon: 'error'
+                                });
+                                
+                                // Reload the admin data
+                                loadAdminData();
+                            }
+                        });
+                    });
+                }
+            });
+        }
+
+        // Export Functions
+        function exportUsers() {
+            window.location.href = '/admin/export/users';
+        }
+
+        function exportListings() {
+            window.location.href = '/admin/export/listings';
+        }
+
+        // Initialize everything on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadAdminData();
+            
+            // Add event listeners
+            document.getElementById('userSearchBtn').addEventListener('click', searchUsers);
+            document.getElementById('listingSearchBtn').addEventListener('click', searchListings);
+            document.getElementById('userPrevPage').addEventListener('click', userPrevPage);
+            document.getElementById('userNextPage').addEventListener('click', userNextPage);
+            document.getElementById('listingPrevPage').addEventListener('click', listingPrevPage);
+            document.getElementById('listingNextPage').addEventListener('click', listingNextPage);
+            document.getElementById('bulkDeleteUsersBtn').addEventListener('click', bulkDeleteUsers);
+            document.getElementById('bulkDeleteListingsBtn').addEventListener('click', bulkDeleteListings);
+            document.getElementById('exportUsersBtn').addEventListener('click', exportUsers);
+            document.getElementById('exportListingsBtn').addEventListener('click', exportListings);
+            if (localStorage.getItem('isAdmin') === 'true') {
+                showAdminDashboard();
+            }
+            
+            // Initialize tooltips and popovers
+            const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+            tooltipTriggerList.map(function (tooltipTriggerEl) {
+                return new bootstrap.Tooltip(tooltipTriggerEl);
+            });
+            
+            const popoverTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="popover"]'));
+            popoverTriggerList.map(function (popoverTriggerEl) {
+                return new bootstrap.Popover(popoverTriggerEl);
+            });
+        });
+        // Admin Functions
+        
+
+// Utility function for alerts
+
+// Other admin functions (delete, toggle, etc.) remain the same as previous implementation
+
+        // Initialize Admin Dashboard
+        async function initAdminDashboard() {
+            if (!currentUser || !currentUser.is_admin) {
+                console.error('Unauthorized access to admin dashboard');
+                return;
+            }
+
+            try {
+                showLoading();
+                const response = await fetch('/admin/dashboard', {
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) throw new Error('Failed to load admin dashboard data');
+                
+                const data = await response.json();
+                
+                // Update dashboard stats
+                document.getElementById('totalUsers').textContent = data.stats.total_users;
+                document.getElementById('verifiedUsers').textContent = data.stats.verified_users;
+                document.getElementById('unverifiedUsers').textContent = data.stats.total_users - data.stats.verified_users;
+                document.getElementById('totalListings').textContent = data.stats.total_listings;
+                document.getElementById('fakeWarnings').textContent = data.stats.fake_warnings;
+                document.getElementById('reportsBadge').textContent = data.stats.pending_reports;
+                document.getElementById('pendingReports').textContent = data.stats.pending_reports;
+                
+                // Populate reports table
+                populateReportsTable(data.reports);
+                
+            } catch (error) {
+                console.error('Error initializing admin dashboard:', error);
+                showAlert('Error', error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // Populate Reports Table
+        function populateReportsTable(reports) {
+            const tableBody = document.getElementById('reportsTableBody');
+            if (!tableBody) {
+                console.error('Reports table body element not found!');
+                return;
+            }
+            
+            tableBody.innerHTML = '';
+            
+            if (!reports || reports.length === 0) {
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="text-center py-3">No reports found</td>
+                    </tr>
+                `;
+                return;
+            }
+            
+            console.log('Populating reports table with:', reports);
+            
+            reports.forEach(report => {
+                const row = document.createElement('tr');
+                
+                // Create status badge with appropriate color
+                let statusBadge = '';
+                if (report.status === 'pending') {
+                    statusBadge = '<span class="badge bg-warning">Pending</span>';
+                } else if (report.status === 'reviewed') {
+                    statusBadge = '<span class="badge bg-primary">Reviewed</span>';
+                } else if (report.status === 'resolved') {
+                    statusBadge = '<span class="badge bg-success">Resolved</span>';
+                }
+                
+                // Format date
+                let formattedDate = 'N/A';
+                if (report.created_at) {
+                    const reportDate = new Date(report.created_at);
+                    formattedDate = reportDate.toLocaleDateString() + ' ' + 
+                                    reportDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                }
+                
+                // Description truncation
+                const shortDescription = report.description ? 
+                    (report.description.length > 50 ? report.description.substring(0, 47) + '...' : report.description) : 
+                    'No description';
+                
+                row.innerHTML = `
+                    <td>${report.id}</td>
+                    <td>${report.listing_title || 'User Report'}</td>
+                    <td>${report.reporter_name || 'Unknown'}</td>
+                    <td>${shortDescription}</td>
+                    <td>${statusBadge}</td>
+                    <td>${formattedDate}</td>
+                    <td>
+                        <button class="btn btn-sm btn-primary view-report-btn" data-report-id="${report.id}">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </td>
+                `;
+                
+                tableBody.appendChild(row);
+            });
+            
+            // Add event listeners to the view buttons
+            document.querySelectorAll('.view-report-btn').forEach(button => {
+                button.addEventListener('click', function() {
+                    const reportId = this.getAttribute('data-report-id');
+                    if (reportId) {
+                        viewReportDetails(reportId);
+                    }
+                });
+            });
+        }
+
+        // View Report Details
+        async function viewReportDetails(reportId) {
+            try {
+                Swal.fire({
+                    title: 'Loading...',
+                    text: 'Fetching report details',
+                    allowOutsideClick: false,
+                    didOpen: () => {
+                        Swal.showLoading();
+                    }
+                });
+                
+                const response = await fetch(`/admin/reports/${reportId}`, {
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Failed to load report details');
+                }
+                
+                const report = await response.json();
+                Swal.close();
+                
+                // Format date
+                const reportDate = new Date(report.created_at);
+                const formattedDate = reportDate.toLocaleDateString() + ' ' + 
+                                    reportDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                
+                // Create status badge with appropriate color
+                let statusBadge = '';
+                if (report.status === 'pending') {
+                    statusBadge = '<span class="badge bg-warning">Pending</span>';
+                } else if (report.status === 'reviewed') {
+                    statusBadge = '<span class="badge bg-primary">Reviewed</span>';
+                } else if (report.status === 'resolved') {
+                    statusBadge = '<span class="badge bg-success">Resolved</span>';
+                }
+                
+                // Populate modal content
+                const modalContent = document.getElementById('reportDetailsContent');
+                modalContent.innerHTML = `
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6>Report Information</h6>
+                            <ul class="list-group mb-3">
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    Status
+                                    ${statusBadge}
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    Reported On
+                                    <span>${formattedDate}</span>
+                                </li>
+                                <li class="list-group-item">
+                                    <strong>Description:</strong>
+                                    <p class="mt-2">${report.description}</p>
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="col-md-6">
+                            <h6>Reporter Information</h6>
+                            <ul class="list-group mb-3">
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    Name
+                                    <span>${report.reporter.name || 'N/A'}</span>
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    Email
+                                    <span>${report.reporter.email || 'N/A'}</span>
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    College
+                                    <span>${report.reporter.college || 'N/A'}</span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <h6>Reported Person Information</h6>
+                            <ul class="list-group mb-3">
+                                ${report.listing ? `
+                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                        Name
+                                        <span>${report.listing.seller.name}</span>
+                                    </li>
+                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                        Email
+                                        <span>${report.listing.seller.email}</span>
+                                    </li>
+                                    <li class="list-group-item">
+                                        <strong>Related Listing:</strong>
+                                        <p class="mt-2">${report.listing.title}</p>
+                                    </li>
+                                ` : report.message_thread ? `
+                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                        Sender
+                                        <span>${report.message_thread.sender.name}</span>
+                                    </li>
+                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                        Receiver
+                                        <span>${report.message_thread.receiver.name}</span>
+                                    </li>
+                                    <li class="list-group-item">
+                                        <strong>Message Content:</strong>
+                                        <p class="mt-2">${report.message_thread.content}</p>
+                                    </li>
+                                ` : `
+                                    <li class="list-group-item">
+                                        <div class="alert alert-warning mb-0">
+                                            No specific person information available
+                                        </div>
+                                    </li>
+                                `}
+                            </ul>
+                        </div>
+                    </div>
+                    
+                    ${report.image_url ? `
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <h6>Evidence Image</h6>
+                            <img src="/static/${report.image_url}" class="img-fluid rounded" style="max-height: 300px;" alt="Report Evidence">
+                        </div>
+                    </div>
+                    ` : ''}
+                `;
+
+                // Store the current report ID for action buttons
+                document.getElementById('resolveReportBtn').setAttribute('data-report-id', report.id);
+                document.getElementById('reviewReportBtn').setAttribute('data-report-id', report.id);
+
+                // Show the modal
+                const reportModal = new bootstrap.Modal(document.getElementById('reportDetailsModal'));
+                reportModal.show();
+
+            } catch (error) {
+                console.error('Error viewing report details:', error);
+                Swal.fire({
+                    title: 'Error',
+                    text: error.message || 'Failed to load report details',
+                    icon: 'error'
+                });
+            }
+        }
+
+        // Function to update admin dashboard stats
+        async function updateAdminDashboardStats() {
+            try {
+                const response = await fetch('/admin/dashboard', {
+                    credentials: 'same-origin'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch dashboard data');
+                }
+
+                const data = await response.json();
+
+                // Update stats
+                document.getElementById('totalUsers').textContent = data.stats.total_users;
+                document.getElementById('verifiedUsers').textContent = data.stats.verified_users;
+                document.getElementById('totalListings').textContent = data.stats.total_listings;
+                document.getElementById('fakeWarnings').textContent = data.stats.fake_warnings;
+                document.getElementById('pendingReports').textContent = data.stats.pending_reports;
+
+                // Update last 30 days stats
+                document.getElementById('newUsers30Days').textContent = `Last 30 days: ${data.stats.new_users_30_days || 0}`;
+                document.getElementById('unverifiedCount').textContent = `Unverified: ${data.stats.total_users - data.stats.verified_users}`;
+                document.getElementById('newListings30Days').textContent = `Last 30 days: ${data.stats.new_listings_30_days || 0}`;
+                document.getElementById('pendingWarnings').textContent = `Pending: ${data.stats.pending_warnings || 0}`;
+
+            } catch (error) {
+                console.error('Error updating dashboard stats:', error);
+                Swal.fire({
+                    title: 'Error',
+                    text: 'Failed to update dashboard statistics',
+                    icon: 'error'
+                });
+            }
+        }
+
+        // Call updateAdminDashboardStats when the dashboard is shown
+        document.getElementById('dashboard-tab').addEventListener('shown.bs.tab', function (e) {
+            updateAdminDashboardStats();
+        });
+
+        // Initial update when page loads if we're on the dashboard tab
+        if (document.getElementById('dashboard-tab').classList.contains('active')) {
+            updateAdminDashboardStats();
+        }
+
+        // Report filter
+        document.getElementById('reportFilter').addEventListener('change', function() {
+            const filterValue = this.value;
+            const reportRows = document.querySelectorAll('#reportsTableBody tr');
+            
+            reportRows.forEach(row => {
+                const statusCell = row.querySelector('td:nth-child(5)');
+                if (!statusCell) return;
+                
+                const statusText = statusCell.textContent.toLowerCase();
+                
+                if (filterValue === '' || statusText.includes(filterValue)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        });
+
+        // Add a function to open the reports tab directly
+        function openAdminReportsTab() {
+            // First open the admin dashboard
+            showAdminDashboard();
+            
+            // Then click on the reports tab
+            setTimeout(() => {
+                document.getElementById('reports-tab').click();
+            }, 500);
+        }
+        
+        // Modify showAdminDashboard to accept a tab parameter
+        function showAdminDashboard(tabToShow = null) {
+            // Stricter admin check - require both localStorage AND current user to be admin
+            // This prevents non-admin users from accessing admin features
+            if (!currentUser || !currentUser.is_admin) {
+                // Clear any admin status in localStorage to be safe
+                localStorage.removeItem('isAdmin');
+                localStorage.removeItem('adminDashboardOpen');
+                showAlert('Access Denied', 'You must be an admin to access this page', 'error');
+                return;
+            }
+
+            // Mark dashboard as open in localStorage
+            localStorage.setItem('adminDashboardOpen', 'true');
+            
+            const adminModal = new bootstrap.Modal(document.getElementById('adminDashboardModal'));
+            adminModal.show();
+            loadAdminData();
+            
+            // Switch to specified tab if provided
+            if (tabToShow) {
+                setTimeout(() => {
+                    document.getElementById(`${tabToShow}-tab`).click();
+                }, 500);
+            }
+            
+            // Store admin status in localStorage
+            localStorage.setItem('isAdmin', 'true');
+            
+            // Add event listener to clear dashboard open state when closed
+            const adminModalEl = document.getElementById('adminDashboardModal');
+            adminModalEl.addEventListener('hidden.bs.modal', function() {
+                localStorage.removeItem('adminDashboardOpen');
+                console.log("Admin dashboard closed, removed from localStorage");
+            });
+        }
+
+        // Add event listeners for report action buttons
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('resolveReportBtn').addEventListener('click', function() {
+                const reportId = this.getAttribute('data-report-id');
+                if (reportId) {
+                    updateReportStatus(reportId, 'resolved');
+                } else {
+                    Swal.fire({
+                        title: 'Error',
+                        text: 'Could not find report ID',
+                        icon: 'error'
+                    });
+                }
+            });
+
+            document.getElementById('reviewReportBtn').addEventListener('click', function() {
+                const reportId = this.getAttribute('data-report-id');
+                if (reportId) {
+                    updateReportStatus(reportId, 'reviewed');
+                } else {
+                    Swal.fire({
+                        title: 'Error',
+                        text: 'Could not find report ID',
+                        icon: 'error'
+                    });
+                }
+            });
+        });
+
+        // Update report status function
+        async function updateReportStatus(reportId, status) {
+            try {
+                const response = await fetch(`/admin/reports/${reportId}/status`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ status })
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.message || 'Failed to update report status');
+                }
+                
+                const result = await response.json();
+                
+                Swal.fire({
+                    title: 'Success',
+                    text: `Report has been marked as ${status}`,
+                    icon: 'success'
+                }).then(() => {
+                    $('#reportDetailModal').modal('hide');
+                    loadReports(); // Refresh the reports list
+                });
+            } catch (error) {
+                Swal.fire({
+                    title: 'Error',
+                    text: error.message || 'An error occurred while updating the report',
+                    icon: 'error'
+                });
+            }
+        }
+
+        // Report filter
+        // ... existing code ...
+        
+        // Load reports function
+        async function loadReports() {
+            try {
+                const response = await fetch('/admin/reports');
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load reports');
+                }
+                
+                const reports = await response.json();
+                const reportsContainer = document.getElementById('reportsContainer');
+                
+                // Clear existing reports
+                reportsContainer.innerHTML = '';
+                
+                if (reports.length === 0) {
+                    reportsContainer.innerHTML = '<div class="text-center p-4"><p>No reports found</p></div>';
+                    return;
+                }
+                
+                // Create report cards
+                reports.forEach(report => {
+                    const statusClass = getStatusClass(report.status);
+                    const card = document.createElement('div');
+                    card.className = 'card mb-3';
+                    card.innerHTML = `
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h5 class="card-title">${report.title || 'Untitled Report'}</h5>
+                                <span class="badge ${statusClass}">${report.status}</span>
+                            </div>
+                            <p class="card-text text-muted mb-2">Reported by: ${report.reportedBy || 'Anonymous'}</p>
+                            <p class="card-text mb-3">${report.description.substring(0, 100)}${report.description.length > 100 ? '...' : ''}</p>
+                            <button class="btn btn-primary btn-sm view-report-btn" data-report-id="${report.id}">View Details</button>
+                        </div>
+                    `;
+                    reportsContainer.appendChild(card);
+                });
+                
+                // Add event listeners to view detail buttons
+                document.querySelectorAll('.view-report-btn').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const reportId = this.getAttribute('data-report-id');
+                        if (reportId) {
+                            showReportDetails(reportId);
+                        }
+                    });
+                });
+            } catch (error) {
+                console.error('Error loading reports:', error);
+                Swal.fire({
+                    title: 'Error',
+                    text: error.message || 'Failed to load reports',
+                    icon: 'error'
+                });
+            }
+        }
+        
+        // Helper function to get status class
+        function getStatusClass(status) {
+            switch(status.toLowerCase()) {
+                case 'pending':
+                    return 'bg-warning text-dark';
+                case 'resolved':
+                    return 'bg-success';
+                case 'reviewed':
+                    return 'bg-info text-dark';
+                default:
+                    return 'bg-secondary';
+            }
+        }
+        
+        // Show report details function
+        async function showReportDetails(reportId) {
+            try {
+                const response = await fetch(`/admin/reports/${reportId}`);
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load report details');
+                }
+                
+                const report = await response.json();
+                
+                // Create status options
+                const statusOptions = ['Pending', 'Reviewed', 'Resolved']
+                    .map(status => `<option value="${status.toLowerCase()}" ${report.status.toLowerCase() === status.toLowerCase() ? 'selected' : ''}>${status}</option>`)
+                    .join('');
+                
+                // Show modal with report details
+                Swal.fire({
+                    title: report.title || 'Report Details',
+                    html: `
+                        <div class="text-start">
+                            <p><strong>Reported by:</strong> ${report.reportedBy || 'Anonymous'}</p>
+                            <p><strong>Date:</strong> ${new Date(report.createdAt).toLocaleString()}</p>
+                            <p><strong>Description:</strong></p>
+                            <div class="border p-2 mb-3 rounded bg-light">
+                                ${report.description}
+                            </div>
+                            <div class="form-group mb-3">
+                                <label for="reportStatus" class="form-label">Status:</label>
+                                <select id="reportStatus" class="form-select">
+                                    ${statusOptions}
+                                </select>
+                            </div>
+                        </div>
+                    `,
+                    showCancelButton: true,
+                    confirmButtonText: 'Update Status',
+                    cancelButtonText: 'Close',
+                    width: '600px'
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        const newStatus = document.getElementById('reportStatus').value;
+                        updateReportStatus(reportId, newStatus);
+                    }
+                });
+            } catch (error) {
+                console.error('Error loading report details:', error);
+                Swal.fire({
+                    title: 'Error',
+                    text: error.message || 'Failed to load report details',
+                    icon: 'error'
+                });
+            }
+        }
+
+        // Add this immediately after the report button
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add event listener directly to the report button
+            const reportBtn = document.querySelector('.chat-header button.btn-outline-danger');
+            if (reportBtn) {
+                reportBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    console.log('Report button clicked');
+                    const reportModal = new bootstrap.Modal(document.getElementById('reportModal'));
+                    reportModal.show();
+                });
+            }
+        });
+        
+        function showReportModal() {
+            console.log("Opening report modal");
+            
+            // Get current conversation info
+            const otherUserId = currentOtherUserId;
+            const listingId = currentListingId; 
+            
+            console.log("Report modal: listing ID =", listingId, "thread ID =", currentMessageThreadId);
+            
+            // If we don't have a message thread ID, create a temporary one
+            if (!currentMessageThreadId) {
+                currentMessageThreadId = `temp_${Date.now()}`;
+                console.log("Created temporary message thread ID:", currentMessageThreadId);
+            }
+            
+            // Update hidden fields
+            document.getElementById('reportListingId').value = listingId || '';
+            document.getElementById('reportMessageThreadId').value = currentMessageThreadId;
+            
+            // Show modal using Bootstrap
+            const reportModal = new bootstrap.Modal(document.getElementById('reportModal'));
+            reportModal.show();
+        }
+
+        function closeReportModal() {
+            const reportModal = bootstrap.Modal.getInstance(document.getElementById('reportModal'));
+            if (reportModal) {
+                reportModal.hide();
+            }
+        }
+
+        // Add function to log download attempts
+        function handleDownload(listingId, title, event) {
+            console.log(`Download initiated for listing #${listingId}: ${title}`);
+            
+            // If not authenticated, prevent default and show login message
+            if (!currentUser) {
+                event.preventDefault();
+                showAlert('Please Login', 'You need to login to download files', 'warning');
+                return false;
+            }
+            
+            // Show loading indicator
+            const downloadBtn = event.currentTarget;
+            const originalText = downloadBtn.innerHTML;
+            downloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Downloading...';
+            downloadBtn.disabled = true;
+            
+            // Set a timer to restore the button if download doesn't start
+            setTimeout(() => {
+                if (downloadBtn.innerHTML.includes('Downloading')) {
+                    downloadBtn.innerHTML = originalText;
+                    downloadBtn.disabled = false;
+                }
+            }, 5000);
+            
+            // Set up error handling for the download
+            window.addEventListener('error', function(e) {
+                if (e.target.tagName === 'A' && e.target === downloadBtn) {
+                    showAlert('Download Failed', 'The file could not be downloaded. Please try again later.', 'error');
+                    downloadBtn.innerHTML = originalText;
+                    downloadBtn.disabled = false;
+                }
+            }, {once: true});
+            
+            return true;
+        }
+        // Add this at the beginning of your JavaScript code
+        function forceDesktopView() {
+            // Set viewport to a fixed width (like desktop)
+            const viewportMeta = document.querySelector('meta[name="viewport"]');
+            if (viewportMeta) {
+                viewportMeta.content = "width=1200, initial-scale=1.0";
+            } else {
+                const meta = document.createElement('meta');
+                meta.name = "viewport";
+                meta.content = "width=1200, initial-scale=1.0";
+                document.head.appendChild(meta);
+            }
+            
+            // Prevent any responsive behavior
+            document.documentElement.style.overflowX = "auto";
+            document.body.style.minWidth = "1200px";
+            document.body.style.overflowX = "auto";
+            
+            // Disable Bootstrap's mobile breakpoints
+            const style = document.createElement('style');
+            style.innerHTML = `
+                @media (max-width: 1200px) {
+                    .container, .container-sm, .container-md, .container-lg, .container-xl, .container-xxl {
+                        max-width: 1200px;
+                    }
+                    .navbar-expand-lg .navbar-collapse {
+                        display: flex !important;
+                    }
+                    .navbar-toggler {
+                        display: none !important;
+                    }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        // Call this function when the page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check if it's a mobile device
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            
+            if (isMobile) {
+                forceDesktopView();
+            }
+            
+            // Rest of your existing DOMContentLoaded code...
+            checkSession();
+            populateCollegeDropdowns();
+            
+            // Add event listeners for search and filters
+            document.getElementById('searchInput').addEventListener('input', debounce(loadListings, 500));
+            document.getElementById('categoryFilter').addEventListener('change', loadListings);
+            document.getElementById('sortFilter').addEventListener('change', loadListings);
+            document.getElementById('collegeFilter').addEventListener('change', loadListings);
+            
+            // Initialize my listings page if we're on that page
+            initializeMyListingsPage();
+            
+            // Initialize wishlist page if we're on that page
+            initializeWishlistPage();
+            
+            // Create skeleton loading cards
+            const skeleton = document.getElementById('loadingSkeleton');
+            for (let i = 0; i < 8; i++) {
+                skeleton.innerHTML += `
+                <div class="col-md-4 col-lg-3">
+                    <div class="listing-card">
+                        <div class="skeleton-loading" style="height: 200px;"></div>
+                        <div class="listing-content">
+                            <div class="skeleton-loading" style="height: 24px; width: 80%; margin-bottom: 12px;"></div>
+                            <div class="skeleton-loading" style="height: 18px; width: 60%; margin-bottom: 12px;"></div>
+                            <div class="skeleton-loading" style="height: 18px; width: 40%; margin-bottom: 12px;"></div>
+                        </div>
+                    </div>
+                </div>
+                `;
+            }
+        });
+
+        // Add this CSS to prevent any responsive behavior
+        const forceDesktopCSS = `
+            @media (max-width: 1200px) {
+                body {
+                    min-width: 1200px;
+                    overflow-x: auto;
+                }
+                .container {
+                    max-width: 1200px !important;
+                }
+             ss   .navbar-collapse {
+                    display: flex !important;
+                }
+                .navbar-toggler {
+                    display: none !important;
+                }
+                .modal-dialog {
+                    max-width: 800px;
+                    margin: 1.75rem auto;
+                }
+            }
+        `;
+
+        // Inject the CSS
+        const style = document.createElement('style');
+        style.innerHTML = forceDesktopCSS;
+        document.head.appendChild(style);
+    </script>
+</body>
+</html>
+
+
+
+'''
