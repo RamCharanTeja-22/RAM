@@ -9318,7 +9318,7 @@ HTML_TEMPLATE='''
                 .container {
                     max-width: 1200px !important;
                 }
-             ss   .navbar-collapse {
+                .navbar-collapse {
                     display: flex !important;
                 }
                 .navbar-toggler {
@@ -9338,7 +9338,4 @@ HTML_TEMPLATE='''
     </script>
 </body>
 </html>
-
-
-
 '''
